@@ -1580,6 +1580,20 @@ Flickable {
                 }
 
                 CheckBox {
+                    id: clipboardAutoSyncCheck
+                    width: parent.width
+                    text: qsTr("Sync the clipboard automatically while streaming (text only)")
+                    font.pointSize: 12
+                    checked: SystemProperties.clipboardAutoSync()
+                    onClicked: SystemProperties.setClipboardAutoSync(checked)
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 9000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Copy on this PC and paste on the host, or the other way round, with no extra steps. Text only, up to 1 MB. Needs a Vibebeam host and the clipboard permissions for this device. Anything you copy, including passwords from a password manager, is sent to the host while this is on. Off by default. Takes effect the next time you start a stream.")
+                }
+
+                CheckBox {
                     id: menuAutoHideCheck
                     width: parent.width
                     text: qsTr("Hide the shortcuts button until I press the hotkey")

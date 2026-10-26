@@ -165,6 +165,9 @@ public:
     void startHostClipboardPull();
     bool takePulledClipboard(QString& text);
 
+    // Optional automatic clipboard sync (text only, both directions); see tickClipboardSync()
+    void tickClipboardSync();
+
     // How "paste as typing" sends text to this PC: Unicode text (default) or key presses.
     // Remembered per PC; PCs that were never set use the older global setting.
     bool typeAsKeyPresses() const;
@@ -328,7 +331,24 @@ private:
         bool clipboardBusy = false;
         bool pulledReady = false;
         QString pulledText;
+
+        // Result of the last automatic clipboard sync request (see startAutoClipboardOp)
+        bool autoDone = false;
+        bool autoFailed = false;
+        bool autoWasPull = false;
+        QString autoText;
+        QString autoError;
     };
+
+    void startAutoClipboardOp(bool pull, const QString& text);
+    bool m_ClipAutoEnabled = false;
+    bool m_ClipAutoStarted = false;
+    bool m_ClipHostBaselined = false;
+    int m_ClipFailures = 0;
+    unsigned int m_ClipNextPull = 0;
+    unsigned int m_ClipNextCheck = 0;
+    QString m_ClipLastLocal;
+    QString m_ClipLastHost;
     std::shared_ptr<UploadState> m_Upload = std::make_shared<UploadState>();
     int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;

@@ -455,6 +455,16 @@ void SystemProperties::setShortcutMenuAutoHide(bool hide)
     QSettings().setValue("vibelight/menuAutoHide", hide);
 }
 
+bool SystemProperties::clipboardAutoSync()
+{
+    return QSettings().value("vibelight/clipboardAutoSync", false).toBool();
+}
+
+void SystemProperties::setClipboardAutoSync(bool enabled)
+{
+    QSettings().setValue("vibelight/clipboardAutoSync", enabled);
+}
+
 QString SystemProperties::problemReportUrl()
 {
     QString body;

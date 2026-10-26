@@ -34,6 +34,7 @@
 
 #include <QtEndian>
 #include <QSettings>
+#include <cstring>
 #include <QCoreApplication>
 #include <QThreadPool>
 #include <QThread>
@@ -1954,6 +1955,158 @@ void Session::startHostClipboardPull()
     thread->start();
 }
 
+void Session::startAutoClipboardOp(bool pull, const QString& text)
+{
+    std::shared_ptr<UploadState> state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->clipboardBusy) {
+            return;
+        }
+        state->clipboardBusy = true;
+    }
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t httpsPort = m_Computer->activeHttpsPort;
+    const QSslCertificate serverCert = m_Computer->serverCert;
+    const bool useTrueUid = !m_Computer->isNvidiaServerSoftware;
+
+    QThread* thread = QThread::create([state, pull, text, address, httpsPort, serverCert, useTrueUid]() {
+        QString result, error;
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        bool ok;
+        if (pull) {
+            ok = http.getClipboardText(result, error);
+        }
+        else {
+            result = text;
+            ok = http.setClipboardText(text, error);
+        }
+
+        QMutexLocker locker(&state->lock);
+        state->clipboardBusy = false;
+        state->autoDone = true;
+        state->autoFailed = !ok;
+        state->autoWasPull = pull;
+        state->autoText = ok ? result : QString();
+        state->autoError = error;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+// Automatic clipboard sync, called from the stream loop on the SDL thread. Everything stays
+// on the clipboard of this PC and the host while streaming: a copy on either side is
+// sent to the other within about a second or two. The clipboard text is never logged.
+void Session::tickClipboardSync()
+{
+    if (!m_ClipAutoStarted) {
+        m_ClipAutoStarted = true;
+        m_ClipAutoEnabled = QSettings().value("vibelight/clipboardAutoSync", false).toBool() &&
+                            m_Computer->vibebeamFeatures.contains("clipboard") &&
+                            !m_Computer->isNvidiaServerSoftware;
+        if (m_ClipAutoEnabled) {
+            // Whatever is on the clipboard now was copied before the stream; don't send it
+            char* raw = SDL_HasClipboardText() ? SDL_GetClipboardText() : nullptr;
+            if (raw != nullptr) {
+                m_ClipLastLocal = QString::fromUtf8(raw);
+                SDL_free(raw);
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic clipboard sync is on");
+        }
+    }
+    if (!m_ClipAutoEnabled) {
+        return;
+    }
+
+    // The stream loop can spin very fast; look at the clipboards twice a second at most
+    const unsigned int checkNow = SDL_GetTicks();
+    if (checkNow - m_ClipNextCheck >= 0x80000000u) {
+        return;
+    }
+    m_ClipNextCheck = checkNow + 500;
+
+    // Finished request?
+    bool done = false, failed = false, wasPull = false;
+    QString text, error;
+    {
+        QMutexLocker locker(&m_Upload->lock);
+        if (m_Upload->autoDone) {
+            done = true;
+            failed = m_Upload->autoFailed;
+            wasPull = m_Upload->autoWasPull;
+            text = m_Upload->autoText;
+            error = m_Upload->autoError;
+            m_Upload->autoDone = false;
+        }
+    }
+    if (done) {
+        if (failed) {
+            if (++m_ClipFailures >= 3) {
+                m_ClipAutoEnabled = false;
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic clipboard sync paused: %s",
+                            error.toUtf8().constData());
+                QMutexLocker locker(&m_Upload->lock);
+                m_Upload->message = "Clipboard sync paused: " + error.toStdString();
+                m_Upload->messageMs = 7000;
+                m_Upload->messageReady = true;
+                return;
+            }
+        }
+        else {
+            m_ClipFailures = 0;
+            if (!wasPull) {
+                m_ClipLastHost = text; // the host now holds exactly what we sent
+            }
+            else if (!m_ClipHostBaselined) {
+                m_ClipHostBaselined = true; // what the host had before the stream; don't copy it over
+                m_ClipLastHost = text;
+            }
+            else if (!text.isEmpty() && text != m_ClipLastHost) {
+                m_ClipLastHost = text;
+                if (text != m_ClipLastLocal) {
+                    m_ClipLastLocal = text;
+                    SDL_SetClipboardText(text.toUtf8().constData());
+                    QMutexLocker locker(&m_Upload->lock);
+                    m_Upload->message = "Copied from the host's clipboard";
+                    m_Upload->messageMs = 1500;
+                    m_Upload->messageReady = true;
+                }
+            }
+        }
+    }
+
+    {
+        QMutexLocker locker(&m_Upload->lock);
+        if (m_Upload->clipboardBusy) {
+            return;
+        }
+    }
+
+    // New local copy? Send it (text only, a size limit, never just blank space)
+    const size_t kMaxSyncBytes = 1024 * 1024;
+    char* raw = SDL_HasClipboardText() ? SDL_GetClipboardText() : nullptr;
+    if (raw != nullptr) {
+        const QString local = QString::fromUtf8(raw);
+        const size_t size = strlen(raw);
+        SDL_free(raw);
+        if (local != m_ClipLastLocal) {
+            m_ClipLastLocal = local;
+            if (!local.trimmed().isEmpty() && size <= kMaxSyncBytes) {
+                startAutoClipboardOp(false, local);
+                return;
+            }
+        }
+    }
+
+    // Otherwise look at the host's clipboard every couple of seconds
+    const unsigned int now = SDL_GetTicks();
+    if (now - m_ClipNextPull < 0x80000000u) {
+        m_ClipNextPull = now + 2000;
+        startAutoClipboardOp(true, QString());
+    }
+}
+
 bool Session::takePulledClipboard(QString& text)
 {
     QMutexLocker locker(&m_Upload->lock);
@@ -2302,6 +2455,8 @@ void Session::exec()
     // because we want to suspend all Qt processing until the stream is over.
     SDL_Event event;
     for (;;) {
+        tickClipboardSync();
+
         // Expire short-lived button messages ("Sent: Alt+Tab")
         if (m_ShortcutMenu != nullptr) {
             m_ShortcutMenu->tick();

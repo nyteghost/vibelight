@@ -171,7 +171,8 @@ public:
              int gamepadMask,
              bool persistGameControllersOnDisconnect,
              QString& rtspSessionUrl,
-             const QString& twoFactorCode = QString());
+             const QString& twoFactorCode = QString(),
+             const QString& monitorId = QString());
 
     // Clipboard sync with Apollo-style hosts such as Vibepollo (text only). Both return false and
     // fill in a short explanation when the host refuses or can't be reached.
@@ -180,6 +181,11 @@ public:
 
     bool
     setClipboardText(const QString& text, QString& error);
+
+    // Lists the monitors this host lets a client choose (Vibebeam hosts). ids[i] goes with names[i].
+    // Blocks for up to a few seconds, so call it from a worker thread.
+    bool
+    getMonitors(QStringList& ids, QStringList& names, QString& error);
 
     // Sends one local file to the host's receive folder (Apollo-style hosts such as Vibebeam with
     // the "Upload files" permission). Blocks until the transfer ends, so call it from a worker

@@ -1,6 +1,9 @@
 #include "computermodel.h"
 
 #include <QThreadPool>
+#include <QThread>
+#include <QSettings>
+#include "backend/nvhttp.h"
 
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
@@ -243,3 +246,51 @@ void ComputerModel::handleComputerStateChanged(NvComputer* computer)
 }
 
 #include "computermodel.moc"
+
+void ComputerModel::chooseMonitorForComputer(int computerIndex)
+{
+    Q_ASSERT(computerIndex < m_Computers.count());
+
+    NvComputer* computer = m_Computers[computerIndex];
+    const QString current = QSettings().value("vibelight/monitor/" + computer->uuid).toString();
+    if (!computer->vibebeamFeatures.contains("monitors")) {
+        emit monitorsReady(computerIndex, QStringList(), QStringList(), current,
+                           tr("This PC doesn't offer a monitor choice. It needs Vibebeam beta.9 or newer."));
+        return;
+    }
+
+    const NvAddress address = computer->activeAddress;
+    const uint16_t httpsPort = computer->activeHttpsPort;
+    const QSslCertificate serverCert = computer->serverCert;
+    const bool useTrueUid = !computer->isNvidiaServerSoftware;
+
+    QThread* thread = QThread::create([this, computerIndex, current, address, httpsPort, serverCert, useTrueUid]() {
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        QStringList ids, names;
+        QString error;
+        if (!http.getMonitors(ids, names, error)) {
+            error = tr("Couldn't get the monitor list: %1").arg(error);
+        }
+        else if (ids.isEmpty()) {
+            error = tr("The host didn't report any monitors to choose from.");
+        }
+        QMetaObject::invokeMethod(this, [this, computerIndex, ids, names, current, error]() {
+            emit monitorsReady(computerIndex, ids, names, current, error);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void ComputerModel::setMonitorForComputer(int computerIndex, QString monitorId)
+{
+    Q_ASSERT(computerIndex < m_Computers.count());
+
+    const QString key = "vibelight/monitor/" + m_Computers[computerIndex]->uuid;
+    if (monitorId.isEmpty()) {
+        QSettings().remove(key);
+    }
+    else {
+        QSettings().setValue(key, monitorId);
+    }
+}

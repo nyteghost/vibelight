@@ -1668,6 +1668,12 @@ bool Session::startConnectionAsync()
     QString twoFactorCode;
     QString twoFactorMessage;
 
+    // The monitor chosen for this PC in its right-click menu (Vibebeam hosts only)
+    QString monitorId;
+    if (m_Computer->vibebeamFeatures.contains("monitors")) {
+        monitorId = QSettings().value("vibelight/monitor/" + m_Computer->uuid).toString();
+    }
+
     for (int attempt = 0;; attempt++) {
         try {
             NvHTTP http(m_Computer);
@@ -1679,7 +1685,8 @@ bool Session::startConnectionAsync()
                           m_InputHandler->getAttachedGamepadMask(),
                           !m_Preferences->multiController,
                           rtspSessionUrl,
-                          twoFactorCode);
+                          twoFactorCode,
+                          monitorId);
             break;
         } catch (const GfeHttpResponseException& e) {
             // Vibebeam hosts answer 470 (code needed) or 471 (code refused) when two-factor is on.

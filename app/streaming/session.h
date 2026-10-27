@@ -317,6 +317,7 @@ private:
     bool m_UnexpectedTermination;
     bool m_StreamStarted = false;       // The SDL stream loop was entered
     bool m_IsReconnectAttempt = false;  // This session was created to resume a dropped one
+    bool m_ReconnectNeedsTwoFactor = false; // the host wants a code, which a background reconnect cannot ask for
     bool m_ReconnectEligible = false;   // The way this session ended is worth retrying
     SdlInputHandler* m_InputHandler;
     ShortcutMenu* m_ShortcutMenu;

@@ -34,6 +34,7 @@
 
 #include <QtEndian>
 #include <QSettings>
+#include <QDeadlineTimer>
 #include <cstring>
 #include <QCoreApplication>
 #include <QThreadPool>
@@ -1582,8 +1583,13 @@ bool Session::promptForTwoFactorCode(const QString& message, QString& code)
 
     emit twoFactorNeeded(message);
 
+    // Don't wait forever if someone walked away from the prompt
+    QDeadlineTimer deadline(3 * 60 * 1000);
     while (!m_TwoFactorAnswered && !m_TwoFactorAbort) {
-        m_TwoFactorWait.wait(&m_TwoFactorMutex);
+        if (!m_TwoFactorWait.wait(&m_TwoFactorMutex, deadline)) {
+            m_TwoFactorCancelled = true;
+            break;
+        }
     }
 
     code = m_TwoFactorCode.simplified();
@@ -1678,6 +1684,13 @@ bool Session::startConnectionAsync()
         } catch (const GfeHttpResponseException& e) {
             // Vibebeam hosts answer 470 (code needed) or 471 (code refused) when two-factor is on.
             // 472 means too many wrong codes, so asking again would not help.
+            if ((e.getStatusCode() == 470 || e.getStatusCode() == 471) && m_IsReconnectAttempt) {
+                // Nobody may be at the keyboard during an automatic reconnect, so never wait for a
+                // code here. Stop retrying and tell the user to connect again by hand.
+                m_ReconnectNeedsTwoFactor = true;
+                emit displayLaunchError(tr("The connection dropped and this PC now needs a two-factor code. Start the stream again and enter the code."));
+                return false;
+            }
             if ((e.getStatusCode() == 470 || e.getStatusCode() == 471) && attempt < 5) {
                 twoFactorMessage = e.getStatusCode() == 471 ?
                             tr("That code was not accepted. Enter a new six-digit code from your authenticator app, or a backup code.") :
@@ -2267,7 +2280,7 @@ void Session::exec()
     if (!m_AsyncConnectionSuccess) {
         // A failed attempt to resume a dropped stream is worth another try
         // (the host may still be waking up or the network coming back).
-        if (m_IsReconnectAttempt) {
+        if (m_IsReconnectAttempt && !m_ReconnectNeedsTwoFactor) {
             m_ReconnectEligible = true;
         }
 

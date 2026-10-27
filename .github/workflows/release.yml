@@ -5,6 +5,8 @@ name: Release
 
 permissions:
   contents: write
+  id-token: write      # for the build provenance attestation
+  attestations: write
 
 on:
   push:
@@ -78,6 +80,14 @@ jobs:
           done
           cp artifacts/Vibelight-macOS-${CI_VERSION}/*.dmg "release/Vibelight-${VERSION}-macOS.dmg" 2>/dev/null || true
           ls -l release
+
+      # A signed statement (GitHub artifact attestation) that these exact files were built by this
+      # workflow from this repository. Check a download with: gh attestation verify <file> -R nyteghost/vibelight
+      - name: Attest build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        with:
+          subject-path: release/*
 
       - name: Create GitHub Release
         shell: bash

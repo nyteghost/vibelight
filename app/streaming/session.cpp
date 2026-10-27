@@ -2039,7 +2039,8 @@ void Session::tickAutoBitrate()
     // Result of the previous change request?
     int result = m_AutoBrResult->load();
     if (result == -2) {
-        return;     // still running\n    }
+        return;     // still running
+    }
     m_AutoBrResult->store(0);
     if (result == -1) {
         if (++m_AutoBrFailures >= 2) {

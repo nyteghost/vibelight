@@ -57,10 +57,10 @@ inline double suggestBitrateMbps(double currentMbps, double dropPercent, unsigne
     }
     else if (dropPercent < 0.3 && (rttMs == 0 || rttMs < 30) && receivedMbps >= currentMbps * 0.8) {
         // Clean, and the stream is actually using what it was given: there may be room to grow
-        suggested = std::min(currentMbps * 1.25, 150.0);
+        suggested = (std::min)(currentMbps * 1.25, 150.0);
     }
 
-    return std::max(5.0, (double)(int)(suggested + 0.5));
+    return (std::max)(5.0, (double)(int)(suggested + 0.5));
 }
 
 // What a connection check found to be the limiting factor
@@ -101,7 +101,7 @@ inline BitrateAdvice analyzeConnection(const ConnectionSample& s)
 
     if (decoderBound && !networkLossy) {
         advice.bottleneck = Bottleneck::Decoder;
-        advice.mbps = std::max(5.0, (double)(int)(s.currentMbps + 0.5));
+        advice.mbps = (std::max)(5.0, (double)(int)(s.currentMbps + 0.5));
     }
     else if (networkLossy) {
         advice.bottleneck = Bottleneck::Network;
@@ -109,7 +109,7 @@ inline BitrateAdvice analyzeConnection(const ConnectionSample& s)
     else if (jittery) {
         // No loss yet, but the path is unsteady: don't grow, shave a little for headroom
         advice.bottleneck = Bottleneck::Jitter;
-        advice.mbps = std::max(5.0, (double)(int)(s.currentMbps * 0.9 + 0.5));
+        advice.mbps = (std::max)(5.0, (double)(int)(s.currentMbps * 0.9 + 0.5));
     }
 
     return advice;
@@ -123,7 +123,7 @@ class AutoBitrateController
 {
 public:
     explicit AutoBitrateController(double ceilingMbps)
-        : m_Ceiling(ceilingMbps), m_Current(ceilingMbps), m_Floor(std::max(5.0, ceilingMbps * 0.25)) {}
+        : m_Ceiling(ceilingMbps), m_Current(ceilingMbps), m_Floor((std::max)(5.0, ceilingMbps * 0.25)) {}
 
     double currentMbps() const { return m_Current; }
 
@@ -151,7 +151,7 @@ public:
                 }
                 if (m_RaisedAtMs != 0 && nowMs - m_RaisedAtMs < 20000) {
                     // The last raise didn't hold: wait longer before trying again
-                    m_RaiseWaitMs = std::min(m_RaiseWaitMs * 2, 300000ull);
+                    m_RaiseWaitMs = (std::min)(m_RaiseWaitMs * 2, 300000ull);
                 }
                 m_RaisedAtMs = 0;
                 m_LossyStreak = 0;
@@ -174,13 +174,13 @@ public:
         }
         m_RaisedAtMs = nowMs;
         m_CleanSinceMs = nowMs;
-        return apply(std::min(m_Ceiling, m_Current * 1.1 + 1.0));
+        return apply((std::min)(m_Ceiling, m_Current * 1.1 + 1.0));
     }
 
 private:
     double apply(double mbps)
     {
-        const double next = std::max(m_Floor, std::min(m_Ceiling, (double)(int)(mbps + 0.5)));
+        const double next = (std::max)(m_Floor, (std::min)(m_Ceiling, (double)(int)(mbps + 0.5)));
         if ((int)next == (int)m_Current) {
             return 0;
         }

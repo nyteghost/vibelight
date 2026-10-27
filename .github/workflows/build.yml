@@ -4,8 +4,7 @@ permissions:
   contents: read
 
 # Every branch push gets a quick Windows x64 build (it also shows up as the check on a pull
-# request for that branch). The full set - Windows x64 + arm64, macOS, Linux AppImage and
-# Steam Link - runs when something lands on master, and on demand from the Actions tab.
+# request for that branch). The full set - Windows x64 + arm64 and macOS - runs when something lands on master, and on demand from the Actions tab.
 on:
   push:
     branches:
@@ -74,22 +73,10 @@ jobs:
         shell: bash
         run: python3 scripts/qml_lint.py
 
-  # Linux AppImage, Steam Link, macOS and Windows arm64 are slow, so they only run for
-  # master and manual runs.
-  build-appimage:
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master'
-    needs: setup
-    uses: ./.github/workflows/build-appimage.yml
-    with:
-      ci_version: ${{ needs.setup.outputs.ci_version }}
-
-  build-steamlink:
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master'
-    needs: setup
-    uses: ./.github/workflows/build-steamlink.yml
-    with:
-      ci_version: ${{ needs.setup.outputs.ci_version }}
-
+  # The Linux AppImage and Steam Link builds are no longer part of CI (nobody ships them; the
+  # reusable workflows build-appimage.yml and build-steamlink.yml are kept in case they are wanted
+  # again - add a job like the one below to bring one back). macOS and Windows arm64 are slow, so
+  # they only run for master and manual runs.
   build-windows-macos:
     needs: setup
     uses: ./.github/workflows/build-win-mac.yml

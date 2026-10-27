@@ -13,6 +13,8 @@ Vibelight is a fork of [Moonlight PC](https://github.com/moonlight-stream/moonli
 ## Recommended host: Vibebeam
 Vibelight works with any Sunshine or GameStream host, but some features need a host that supports Apollo-style extras. The companion host is [Vibebeam](https://github.com/nyteghost/vibebeam), a fork of [Vibepollo](https://github.com/Nonary/Vibepollo) (itself based on Apollo and Sunshine). It is kept in step with Nonary's Vibepollo by a scheduled sync that opens a pull request when upstream changes, and its update checks use its own releases. Features that need such a host today: **Clipboard sync** (allow clipboard access for Vibelight in the host's web UI), **File drop**, and **Two-factor codes**. Everything else works with stock Sunshine.
 
+**Compatibility rule:** Vibelight and Vibebeam never need each other. Vibelight works with ordinary Sunshine, Apollo and GameStream hosts, and Vibebeam works with ordinary Moonlight clients (including Moonlight on iOS; give such a client **Exempt from 2FA** if the host requires 2FA). Extra features switch on only when the host advertises support for them (`VibebeamFeatures` in its server info), and a new feature must keep it that way.
+
 ## What's different from upstream Moonlight
 
 ### Floating "Shortcuts" button

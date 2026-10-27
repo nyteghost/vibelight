@@ -1,3 +1,4 @@
+#include <QRegularExpression>
 #include "nvcomputer.h"
 #include <Limelight.h>
 
@@ -661,6 +662,82 @@ NvHTTP::getMonitors(QStringList& ids, QStringList& names, QString& error)
         error = "the host's answer couldn't be read";
         return false;
     }
+    return true;
+}
+
+bool
+NvHTTP::setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error)
+{
+    appliedKbps = 0;
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/bitrate");
+    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex() +
+                 "&bitrate=" + QString::number(bitrateKbps));
+
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+#endif
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(4000, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) {
+        reply->abort();
+    }
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+    m_Nam->clearAccessCache();
+#endif
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    delete reply;
+
+    if (timedOut) {
+        error = "the host didn't answer";
+        return false;
+    }
+    if (status == 401 || status == 403) {
+        error = "the host refused it";
+        return false;
+    }
+    if (status == 404) {
+        error = "this host can't change the bitrate while streaming";
+        return false;
+    }
+    if (status != 200) {
+        error = "request failed (" + QString::number(status) + ")";
+        return false;
+    }
+
+    // The host answers with XML such as <root status_code="200"><bitrate>30000</bitrate></root>;
+    // a refused change still comes back as HTTP 200 with a different status_code
+    const QString text = QString::fromUtf8(body);
+    QRegularExpressionMatch code = QRegularExpression("status_code=\"(\\d+)\"").match(text);
+    if (code.hasMatch() && code.captured(1).toInt() != 200) {
+        error = code.captured(1).toInt() == 404 ? "no active stream for this device" : "the host refused the new bitrate";
+        return false;
+    }
+    QRegularExpressionMatch applied = QRegularExpression("<bitrate>(\\d+)</bitrate>").match(text);
+    appliedKbps = applied.hasMatch() ? applied.captured(1).toInt() : bitrateKbps;
     return true;
 }
 

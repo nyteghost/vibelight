@@ -182,6 +182,12 @@ public:
     bool
     setClipboardText(const QString& text, QString& error);
 
+    // Changes the video bitrate of the running stream (Apollo-style hosts such as Vibebeam). Fills
+    // in the bitrate the host actually applied (it may clamp), or a short explanation on failure.
+    // Blocks for up to a few seconds, so call it from a worker thread.
+    bool
+    setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error);
+
     // Lists the monitors this host lets a client choose (Vibebeam hosts). ids[i] goes with names[i].
     // Blocks for up to a few seconds, so call it from a worker thread.
     bool

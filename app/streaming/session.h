@@ -7,6 +7,8 @@
 #include <QStringList>
 #include <string>
 #include <memory>
+#include <atomic>
+#include "streaming/vibelight_logic.h"
 #include <QQuickWindow>
 
 #include <Limelight.h>
@@ -168,10 +170,15 @@ public:
     // Optional automatic clipboard sync (text only, both directions); see tickClipboardSync()
     void tickClipboardSync();
 
+    // Optional automatic bitrate control while streaming; see tickAutoBitrate()
+    void tickAutoBitrate();
+
     // How "paste as typing" sends text to this PC: Unicode text (default) or key presses.
     // Remembered per PC; PCs that were never set use the older global setting.
     bool typeAsKeyPresses() const;
     void setTypeAsKeyPresses(bool asKeys);
+    int getStreamFps() const { return m_StreamConfig.fps; }
+
     int getConfiguredBitrateKbps() const
     {
         return m_StreamConfig.bitrate;
@@ -343,6 +350,16 @@ private:
 
     void startAutoClipboardOp(bool pull, const QString& text);
     bool m_ClipAutoEnabled = false;
+    bool m_AutoBrStarted = false;
+    bool m_AutoBrEnabled = false;
+    std::unique_ptr<vibelight::AutoBitrateController> m_AutoBr;
+    unsigned int m_AutoBrNextTick = 0;
+    unsigned int m_AutoBrLastFrames = 0, m_AutoBrLastDropped = 0;
+    unsigned int m_AutoBrLastDecoded = 0, m_AutoBrLastPacerDropped = 0;
+    unsigned long long m_AutoBrLastDecodeUs = 0;
+    int m_AutoBrFailures = 0;
+    int m_AutoBrLastKbps = 0;
+    std::shared_ptr<std::atomic<int>> m_AutoBrResult;   // worker -> loop: 0 idle/none, >0 applied kbps, -1 failed (host can't), -2 busy
     bool m_ClipAutoStarted = false;
     bool m_ClipHostBaselined = false;
     int m_ClipFailures = 0;

@@ -465,6 +465,16 @@ void SystemProperties::setClipboardAutoSync(bool enabled)
     QSettings().setValue("vibelight/clipboardAutoSync", enabled);
 }
 
+bool SystemProperties::autoBitrate()
+{
+    return QSettings().value("vibelight/autoBitrate", false).toBool();
+}
+
+void SystemProperties::setAutoBitrate(bool enabled)
+{
+    QSettings().setValue("vibelight/autoBitrate", enabled);
+}
+
 QString SystemProperties::problemReportUrl()
 {
     QString body;

@@ -1017,6 +1017,9 @@ void ShortcutMenu::startConnectionCheck()
 
     m_CheckStartFrames = snapshot.totalFrames;
     m_CheckStartDropped = snapshot.networkDroppedFrames;
+    m_CheckStartDecoded = snapshot.decodedFrames;
+    m_CheckStartPacerDropped = snapshot.pacerDroppedFrames;
+    m_CheckStartDecodeUs = snapshot.totalDecodeTimeUs;
     m_CheckEndsAt = SDL_GetTicks() + 10000;
     m_CheckActive = true;
     showTransient("Checking connection for 10 s...", 12000);
@@ -1043,10 +1046,31 @@ void ShortcutMenu::finishConnectionCheck()
 
     double dropPercent = 100.0 * dropped / frames;
     double currentMbps = session->getConfiguredBitrateKbps() / 1000.0;
-    const double suggestedMbps = vibelight::suggestBitrateMbps(currentMbps, dropPercent, snapshot.rttMs, snapshot.videoMbps);
+    vibelight::ConnectionSample sample;
+    sample.currentMbps = currentMbps;
+    sample.receivedMbps = snapshot.videoMbps;
+    sample.dropPercent = dropPercent;
+    sample.rttMs = snapshot.rttMs;
+    sample.rttVarianceMs = snapshot.rttVarianceMs;
+    unsigned int decoded = snapshot.decodedFrames - m_CheckStartDecoded;
+    if (decoded > 0) {
+        sample.avgDecodeMs = (snapshot.totalDecodeTimeUs - m_CheckStartDecodeUs) / 1000.0 / decoded;
+        sample.pacerDropPercent = 100.0 * (snapshot.pacerDroppedFrames - m_CheckStartPacerDropped) / decoded;
+    }
+    sample.fps = session->getStreamFps();
+    const vibelight::BitrateAdvice advice = vibelight::analyzeConnection(sample);
+    const double suggestedMbps = advice.mbps;
 
-    char buf[160];
-    if (dropPercent >= 1.0) {
+    char buf[200];
+    if (advice.bottleneck == vibelight::Bottleneck::Decoder) {
+        SDL_snprintf(buf, sizeof(buf), "This PC is the limit (%.0f ms decode, %.1f%% late). A lower resolution, frame rate or codec will help more than bitrate",
+                     sample.avgDecodeMs, sample.pacerDropPercent);
+    }
+    else if (advice.bottleneck == vibelight::Bottleneck::Jitter) {
+        SDL_snprintf(buf, sizeof(buf), "Connection is unsteady (ping varies by %u ms). Try %d Mbps (now %d)",
+                     snapshot.rttVarianceMs, (int)suggestedMbps, (int)(currentMbps + 0.5));
+    }
+    else if (dropPercent >= 1.0) {
         SDL_snprintf(buf, sizeof(buf), "Dropping %.1f%% of frames. Try %d Mbps (now %d)",
                      dropPercent, (int)suggestedMbps, (int)(currentMbps + 0.5));
     }

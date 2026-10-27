@@ -1594,6 +1594,20 @@ Flickable {
                 }
 
                 CheckBox {
+                    id: autoBitrateCheck
+                    width: parent.width
+                    text: qsTr("Adjust the video bitrate automatically while streaming")
+                    font.pointSize: 12
+                    checked: SystemProperties.autoBitrate()
+                    onClicked: SystemProperties.setAutoBitrate(checked)
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 9000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Lowers the bitrate when frames are being lost and raises it again, slowly, once the connection stays clean. It never goes above the bitrate you chose. Needs a Vibebeam host or another Apollo-style host; with a standard Sunshine host it turns itself off. Off by default. Takes effect the next time you start a stream.")
+                }
+
+                CheckBox {
                     id: menuAutoHideCheck
                     width: parent.width
                     text: qsTr("Hide the shortcuts button until I press the hotkey")

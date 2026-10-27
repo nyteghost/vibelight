@@ -181,6 +181,12 @@ public:
     bool
     setClipboardText(const QString& text, QString& error);
 
+    // Changes the video bitrate of the running stream (Apollo-style hosts such as Vibebeam). Fills
+    // in the bitrate the host actually applied (it may clamp), or a short explanation on failure.
+    // Blocks for up to a few seconds, so call it from a worker thread.
+    bool
+    setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error);
+
     // Sends one local file to the host's receive folder (Apollo-style hosts such as Vibebeam with
     // the "Upload files" permission). Blocks until the transfer ends, so call it from a worker
     // thread. Fills in the name the host saved it under, or a short explanation on failure.

@@ -2011,6 +2011,131 @@ void Session::startAutoClipboardOp(bool pull, const QString& text)
 // Automatic clipboard sync, called from the stream loop on the SDL thread. Everything stays
 // on the clipboard of this PC and the host while streaming: a copy on either side is
 // sent to the other within about a second or two. The clipboard text is never logged.
+void Session::tickAutoBitrate()
+{
+    if (!m_AutoBrStarted) {
+        m_AutoBrStarted = true;
+        m_AutoBrEnabled = QSettings().value("vibelight/autoBitrate", false).toBool() &&
+                          !m_Computer->isNvidiaServerSoftware &&
+                          m_StreamConfig.bitrate > 0;
+        if (m_AutoBrEnabled) {
+            m_AutoBr.reset(new vibelight::AutoBitrateController(m_StreamConfig.bitrate / 1000.0));
+            m_AutoBrResult = std::make_shared<std::atomic<int>>(0);
+            m_AutoBrLastKbps = m_StreamConfig.bitrate;
+            m_AutoBrNextTick = SDL_GetTicks() + 10000;   // let the stream settle first
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate is on (ceiling %d kbps)", m_StreamConfig.bitrate);
+        }
+    }
+    if (!m_AutoBrEnabled) {
+        return;
+    }
+
+    const unsigned int now = SDL_GetTicks();
+    if (now - m_AutoBrNextTick >= 0x80000000u) {
+        return;
+    }
+    m_AutoBrNextTick = now + 5000;
+
+    // Result of the previous change request?
+    int result = m_AutoBrResult->load();
+    if (result == -2) {
+        return;     // still running\n    }
+    m_AutoBrResult->store(0);
+    if (result == -1) {
+        if (++m_AutoBrFailures >= 2) {
+            m_AutoBrEnabled = false;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
+            QMutexLocker locker(&m_Upload->lock);
+            m_Upload->message = "Automatic bitrate paused: this host didn't accept the change";
+            m_Upload->messageMs = 7000;
+            m_Upload->messageReady = true;
+            return;
+        }
+    }
+    else if (result > 0) {
+        m_AutoBrFailures = 0;
+    }
+
+    CONNECTION_SNAPSHOT snap = {};
+    if (!getConnectionSnapshot(snap)) {
+        return;
+    }
+    const unsigned int frames = snap.totalFrames - m_AutoBrLastFrames;
+    const unsigned int dropped = snap.networkDroppedFrames - m_AutoBrLastDropped;
+    const unsigned int decoded = snap.decodedFrames - m_AutoBrLastDecoded;
+    const unsigned long long decodeUs = snap.totalDecodeTimeUs - m_AutoBrLastDecodeUs;
+    const unsigned int pacerDropped = snap.pacerDroppedFrames - m_AutoBrLastPacerDropped;
+    m_AutoBrLastFrames = snap.totalFrames;
+    m_AutoBrLastDropped = snap.networkDroppedFrames;
+    m_AutoBrLastDecoded = snap.decodedFrames;
+    m_AutoBrLastDecodeUs = snap.totalDecodeTimeUs;
+    m_AutoBrLastPacerDropped = snap.pacerDroppedFrames;
+
+    // A paused, minimized or idle stream says nothing about the connection
+    if (frames < 60) {
+        return;
+    }
+
+    vibelight::ConnectionSample sample;
+    sample.dropPercent = 100.0 * dropped / frames;
+    sample.fps = m_StreamConfig.fps;
+    if (decoded > 0) {
+        sample.avgDecodeMs = decodeUs / 1000.0 / decoded;
+        sample.pacerDropPercent = 100.0 * pacerDropped / decoded;
+    }
+    const double frameMs = 1000.0 / (sample.fps > 1.0 ? sample.fps : 60.0);
+    const bool decoderBound = sample.avgDecodeMs > frameMs * 0.8 ||
+                              (sample.pacerDropPercent >= 2.0 && sample.dropPercent < 1.0);
+
+    const double next = m_AutoBr->update(now, sample.dropPercent, decoderBound);
+    if (next <= 0) {
+        return;
+    }
+
+    // Skip if the previous request is somehow still running
+    int idle = 0;
+    if (!m_AutoBrResult->compare_exchange_strong(idle, -2)) {
+        return;
+    }
+
+    const int kbps = (int)(next * 1000);
+    const int previousKbps = m_AutoBrLastKbps;
+    m_AutoBrLastKbps = kbps;
+    {
+        QMutexLocker locker(&m_Upload->lock);
+        char buf[160];
+        SDL_snprintf(buf, sizeof(buf), "Bitrate %s to %d Mbps (%s)",
+                     kbps < previousKbps ? "lowered" : "raised",
+                     kbps / 1000,
+                     sample.dropPercent >= 1.5 ? "dropping frames" : "connection is clean");
+        m_Upload->message = buf;
+        m_Upload->messageMs = 4000;
+        m_Upload->messageReady = true;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: %d kbps (%.1f%% dropped)", kbps, sample.dropPercent);
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t httpsPort = m_Computer->activeHttpsPort;
+    const QSslCertificate serverCert = m_Computer->serverCert;
+    const bool useTrueUid = !m_Computer->isNvidiaServerSoftware;
+    std::shared_ptr<std::atomic<int>> resultSlot = m_AutoBrResult;
+
+    QThread* thread = QThread::create([address, httpsPort, serverCert, useTrueUid, kbps, resultSlot]() {
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        int applied = 0;
+        QString error;
+        if (http.setRuntimeBitrate(kbps, applied, error)) {
+            resultSlot->store(applied > 0 ? applied : kbps);
+        }
+        else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate change failed: %s", error.toUtf8().constData());
+            resultSlot->store(-1);
+        }
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 void Session::tickClipboardSync()
 {
     if (!m_ClipAutoStarted) {
@@ -2469,6 +2594,7 @@ void Session::exec()
     SDL_Event event;
     for (;;) {
         tickClipboardSync();
+        tickAutoBitrate();
 
         // Expire short-lived button messages ("Sent: Alt+Tab")
         if (m_ShortcutMenu != nullptr) {

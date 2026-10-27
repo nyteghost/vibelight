@@ -137,6 +137,58 @@ static void testAnalyzeConnection()
     CHECK(a.bottleneck == Bottleneck::None);
 }
 
+static void testAutoBitrate()
+{
+    using vibelight::AutoBitrateController;
+    AutoBitrateController c(50);
+    unsigned long long t = 1000;
+
+    // Clean at the ceiling: nothing to do
+    CHECK(c.update(t += 5000, 0.0, false) == 0);
+
+    // Heavy loss: cut to 60% right away
+    CHECK(c.update(t += 5000, 5.0, false) == 30);
+    // Another heavy window inside the 8 s cooldown: wait
+    CHECK(c.update(t += 5000, 5.0, false) == 0);
+    // After the cooldown a heavy window cuts again
+    CHECK(c.update(t += 5000, 5.0, false) == 18);
+    // Never below a quarter of the ceiling (12.5 -> 13 after rounding)
+    for (int i = 0; i < 6; i++) c.update(t += 9000, 8.0, false);
+    CHECK(c.currentMbps() >= 12.5);
+    CHECK(c.currentMbps() <= 13.0);
+
+    // Clean for a while: climbs slowly, never above the ceiling
+    AutoBitrateController d(50);
+    t = 1000;
+    CHECK(d.update(t += 5000, 5.0, false) == 30);
+    // Holds for the 60 s after a cut even if clean
+    for (int i = 0; i < 10; i++) CHECK(d.update(t += 5000, 0.0, false) == 0);
+    // then raises in small steps
+    double raised = 0;
+    for (int i = 0; i < 40 && raised == 0; i++) raised = d.update(t += 5000, 0.0, false);
+    CHECK(raised > 30 && raised <= 34);
+    for (int i = 0; i < 400; i++) d.update(t += 5000, 0.0, false);
+    CHECK(d.currentMbps() == 50);
+
+    // One lossy window alone doesn't cut; two in a row do
+    AutoBitrateController e(50);
+    t = 1000;
+    CHECK(e.update(t += 5000, 2.0, false) == 0);
+    CHECK(e.update(t += 5000, 2.0, false) == 40);
+    // A lossy window followed by a clean one resets the streak
+    AutoBitrateController f(50);
+    t = 1000;
+    CHECK(f.update(t += 5000, 2.0, false) == 0);
+    CHECK(f.update(t += 5000, 0.0, false) == 0);
+    CHECK(f.update(t += 5000, 2.0, false) == 0);
+
+    // A decoder-bound stream is left alone
+    AutoBitrateController g(50);
+    t = 1000;
+    CHECK(g.update(t += 5000, 6.0, true) == 0);
+    CHECK(g.currentMbps() == 50);
+}
+
 static void testBitrate()
 {
     using vibelight::suggestBitrateMbps;
@@ -213,6 +265,7 @@ int main()
 {
     testKeys();
     testBitrate();
+    testAutoBitrate();
     testAnalyzeConnection();
     testHotkey();
 

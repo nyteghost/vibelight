@@ -63,6 +63,8 @@ public:
     Q_INVOKABLE bool shortcutMenuAutoHide();
     Q_INVOKABLE void setShortcutMenuAutoHide(bool hide);
     Q_INVOKABLE bool clipboardAutoSync();
+    Q_INVOKABLE bool autoBitrate();
+    Q_INVOKABLE void setAutoBitrate(bool enabled);
     Q_INVOKABLE void setClipboardAutoSync(bool enabled);
     Q_INVOKABLE void setShortcutMenuHotkey(const QString& letter);
     Q_INVOKABLE bool shouldShowWhatsNew();

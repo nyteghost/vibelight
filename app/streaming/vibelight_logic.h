@@ -115,6 +115,87 @@ inline BitrateAdvice analyzeConnection(const ConnectionSample& s)
     return advice;
 }
 
+// Automatic bitrate control for a running stream. Feed it one sample every few seconds; it says
+// when to change the bitrate. Built to be calm: it cuts quickly when frames are being lost, climbs
+// slowly after a long clean stretch, never goes above the bitrate the person chose, and backs off
+// from raising again if a raise was followed by loss. Pure logic, no clock or network inside.
+class AutoBitrateController
+{
+public:
+    explicit AutoBitrateController(double ceilingMbps)
+        : m_Ceiling(ceilingMbps), m_Current(ceilingMbps), m_Floor(std::max(5.0, ceilingMbps * 0.25)) {}
+
+    double currentMbps() const { return m_Current; }
+
+    // dropPercent: frames lost on the network during this window. decoderBound: the PC, not the
+    // network, is the limit (changing the bitrate won't help). Returns the new bitrate in Mbps,
+    // or 0 if nothing should change.
+    double update(unsigned long long nowMs, double dropPercent, bool decoderBound)
+    {
+        if (decoderBound) {
+            m_CleanSinceMs = nowMs;
+            return 0;
+        }
+
+        const bool heavy = dropPercent >= 3.0;
+        const bool lossy = dropPercent >= 1.5;
+        const bool clean = dropPercent < 0.2;
+
+        if (heavy || lossy) {
+            // Two lossy windows in a row before a gentle cut; a heavy one cuts at once
+            m_LossyStreak++;
+            m_CleanSinceMs = nowMs;
+            if (heavy || m_LossyStreak >= 2) {
+                if (m_Current <= m_Floor + 0.01 || nowMs < m_NextCutMs) {
+                    return 0;
+                }
+                if (m_RaisedAtMs != 0 && nowMs - m_RaisedAtMs < 20000) {
+                    // The last raise didn't hold: wait longer before trying again
+                    m_RaiseWaitMs = std::min(m_RaiseWaitMs * 2, 300000ull);
+                }
+                m_RaisedAtMs = 0;
+                m_LossyStreak = 0;
+                m_NextCutMs = nowMs + 8000;
+                return apply(m_Current * (heavy ? 0.6 : 0.8));
+            }
+            return 0;
+        }
+
+        m_LossyStreak = 0;
+        if (!clean) {
+            m_CleanSinceMs = nowMs;     // in between: neither cut nor climb
+            return 0;
+        }
+        if (m_Current >= m_Ceiling - 0.01 || nowMs < m_NextCutMs + 60000 * (m_NextCutMs != 0)) {
+            return 0;
+        }
+        if (nowMs - m_CleanSinceMs < m_RaiseWaitMs) {
+            return 0;
+        }
+        m_RaisedAtMs = nowMs;
+        m_CleanSinceMs = nowMs;
+        return apply(std::min(m_Ceiling, m_Current * 1.1 + 1.0));
+    }
+
+private:
+    double apply(double mbps)
+    {
+        const double next = std::max(m_Floor, std::min(m_Ceiling, (double)(int)(mbps + 0.5)));
+        if ((int)next == (int)m_Current) {
+            return 0;
+        }
+        m_Current = next;
+        return next;
+    }
+
+    double m_Ceiling, m_Current, m_Floor;
+    unsigned long long m_CleanSinceMs = 0;
+    unsigned long long m_NextCutMs = 0;
+    unsigned long long m_RaisedAtMs = 0;
+    unsigned long long m_RaiseWaitMs = 30000;
+    int m_LossyStreak = 0;
+};
+
 // Letters that can be the last key of the shortcuts menu hotkey (Ctrl+Alt+Shift+<letter>). The
 // others are taken by Vibelight/Moonlight actions: Q Z X S M C D V L E K.
 inline const char* menuHotkeyChoices()

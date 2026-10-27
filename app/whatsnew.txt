@@ -17,8 +17,6 @@ Shortcuts menu (Ctrl+Alt+Shift+H)
 Security
 - The 2FA code is never written to the log, and the 2FA prompt can be closed cleanly while you quit.
 - In-app updates now only install a download whose checksum was verified.
-
-Security (2)
 - Releases now carry a build provenance attestation. Check a download with `gh attestation verify <file> -R nyteghost/vibelight` (see SECURITY.md).
 
 Fixes

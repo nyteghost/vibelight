@@ -92,6 +92,51 @@ static void testKeys()
     CHECK(!vibelight::asciiToKey((char)0xC3, vk, shift));
 }
 
+static void testAnalyzeConnection()
+{
+    using namespace vibelight;
+    ConnectionSample s;
+    s.currentMbps = 50; s.receivedMbps = 50; s.rttMs = 20; s.fps = 60;
+
+    // Clean: same advice as the simple rule
+    BitrateAdvice a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::None);
+    CHECK(a.mbps == 63);
+
+    // Network loss: back off, blame the network
+    s.dropPercent = 5.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Network);
+    CHECK(a.mbps == 30);
+
+    // Slow decoding with a clean network: keep the bitrate, blame the PC
+    s.dropPercent = 0.0; s.avgDecodeMs = 15.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Decoder);
+    CHECK(a.mbps == 50);
+
+    // Frames dropped before display with a clean network
+    s.avgDecodeMs = 4.0; s.pacerDropPercent = 3.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Decoder);
+
+    // Loss wins over decoder suspicion (the network is the first thing to fix)
+    s.dropPercent = 4.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Network);
+
+    // Unsteady path without loss: hold and shave 10%
+    s.dropPercent = 0.0; s.pacerDropPercent = 0.0; s.rttMs = 40; s.rttVarianceMs = 25;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Jitter);
+    CHECK(a.mbps == 45);
+
+    // Small variance next to a long ping is normal
+    s.rttMs = 120; s.rttVarianceMs = 20;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::None);
+}
+
 static void testBitrate()
 {
     using vibelight::suggestBitrateMbps;
@@ -168,6 +213,7 @@ int main()
 {
     testKeys();
     testBitrate();
+    testAnalyzeConnection();
     testHotkey();
 
     if (g_failures == 0) {

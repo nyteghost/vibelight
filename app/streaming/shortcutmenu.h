@@ -209,6 +209,9 @@ private:
     unsigned int m_CheckEndsAt;
     unsigned int m_CheckStartFrames;
     unsigned int m_CheckStartDropped;
+    unsigned int m_CheckStartDecoded = 0;
+    unsigned int m_CheckStartPacerDropped = 0;
+    unsigned long long m_CheckStartDecodeUs = 0;
     std::string m_ConfigProblem;
 
     bool m_HintOverridden;

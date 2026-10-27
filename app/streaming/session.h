@@ -172,6 +172,8 @@ public:
     // Remembered per PC; PCs that were never set use the older global setting.
     bool typeAsKeyPresses() const;
     void setTypeAsKeyPresses(bool asKeys);
+    int getStreamFps() const { return m_StreamConfig.fps; }
+
     int getConfiguredBitrateKbps() const
     {
         return m_StreamConfig.bitrate;

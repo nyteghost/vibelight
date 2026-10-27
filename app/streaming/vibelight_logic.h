@@ -63,6 +63,58 @@ inline double suggestBitrateMbps(double currentMbps, double dropPercent, unsigne
     return std::max(5.0, (double)(int)(suggested + 0.5));
 }
 
+// What a connection check found to be the limiting factor
+enum class Bottleneck { None, Network, Jitter, Decoder };
+
+// Everything the connection check measured over its window
+struct ConnectionSample {
+    double currentMbps = 0;        // configured bitrate
+    double receivedMbps = 0;       // bitrate actually received
+    double dropPercent = 0;        // frames lost on the network
+    unsigned int rttMs = 0;        // 0 if unknown
+    unsigned int rttVarianceMs = 0;
+    double avgDecodeMs = 0;        // 0 if unknown
+    double pacerDropPercent = 0;   // frames decoded but dropped before display
+    double fps = 60;               // stream frame rate
+};
+
+struct BitrateAdvice {
+    double mbps = 0;               // bitrate to suggest (whole Mbps)
+    Bottleneck bottleneck = Bottleneck::None;
+};
+
+// Like suggestBitrateMbps, but also tells a slow network from a slow PC. Lowering the bitrate
+// helps with the first and does little for the second, so a decoder-limited stream is left at
+// its bitrate and the caller suggests a lighter resolution, frame rate or codec instead.
+inline BitrateAdvice analyzeConnection(const ConnectionSample& s)
+{
+    BitrateAdvice advice;
+    advice.mbps = suggestBitrateMbps(s.currentMbps, s.dropPercent, s.rttMs, s.receivedMbps);
+
+    const double frameMs = 1000.0 / (s.fps > 1.0 ? s.fps : 60.0);
+    const bool networkLossy = s.dropPercent >= 1.0;
+    // Decoding takes most of the frame time, or frames reach the PC but are dropped before display
+    const bool decoderBound = (s.avgDecodeMs > frameMs * 0.8) ||
+                              (s.pacerDropPercent >= 2.0 && !networkLossy);
+    // A jumpy connection: round-trip variance is large next to the round-trip itself
+    const bool jittery = s.rttVarianceMs >= 15 && s.rttVarianceMs * 2 >= s.rttMs;
+
+    if (decoderBound && !networkLossy) {
+        advice.bottleneck = Bottleneck::Decoder;
+        advice.mbps = std::max(5.0, (double)(int)(s.currentMbps + 0.5));
+    }
+    else if (networkLossy) {
+        advice.bottleneck = Bottleneck::Network;
+    }
+    else if (jittery) {
+        // No loss yet, but the path is unsteady: don't grow, shave a little for headroom
+        advice.bottleneck = Bottleneck::Jitter;
+        advice.mbps = std::max(5.0, (double)(int)(s.currentMbps * 0.9 + 0.5));
+    }
+
+    return advice;
+}
+
 // Letters that can be the last key of the shortcuts menu hotkey (Ctrl+Alt+Shift+<letter>). The
 // others are taken by Vibelight/Moonlight actions: Q Z X S M C D V L E K.
 inline const char* menuHotkeyChoices()

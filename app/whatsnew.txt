@@ -18,6 +18,9 @@ Security
 - The 2FA code is never written to the log, and the 2FA prompt can be closed cleanly while you quit.
 - In-app updates now only install a download whose checksum was verified.
 
+Fixes
+- Auto-reconnect no longer hangs waiting for a two-factor code when nobody is there. It stops and tells you to start the stream again. The code prompt also gives up after 3 minutes.
+
 Connection
 - Auto-reconnect: if the stream drops, Vibelight tries up to 3 times to resume.
 - Hold left Ctrl+Alt+Z to release the mouse and move it outside the window.

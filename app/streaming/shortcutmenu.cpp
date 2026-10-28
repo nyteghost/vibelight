@@ -906,7 +906,7 @@ void ShortcutMenu::recordRecent(const Item& item)
     settings.setValue("vibelight/recentShortcuts", recents);
 }
 
-void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs)
+void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs, TransientPlacement placement)
 {
     if (m_Window == nullptr || m_Expanded) {
         // Never disturb an open menu
@@ -917,6 +917,7 @@ void ShortcutMenu::showTransient(const std::string& message, unsigned int durati
         m_TransientOwnsReveal = !m_Revealed;
     }
     m_TransientMessage = message;
+    m_TransientPlacement = placement;
     m_TransientUntil = SDL_GetTicks() + durationMs;
     if (m_TransientUntil == 0) {
         m_TransientUntil = 1;
@@ -941,6 +942,7 @@ void ShortcutMenu::endTransient()
     m_TransientUntil = 0;
     m_TransientOwnsReveal = false;
     m_TransientMessage.clear();
+    m_TransientPlacement = TransientPlacement::AtButton;
 
     if (m_Window == nullptr) {
         return;
@@ -1265,7 +1267,18 @@ void ShortcutMenu::updatePosition()
     SDL_GetWindowSize(m_Window, &w, &h);
 
     int x, y;
-    if (m_HasCustomPosition) {
+    const bool anchoredTransient = m_TransientUntil != 0 && !m_Expanded &&
+                                   m_TransientPlacement != TransientPlacement::AtButton;
+    if (anchoredTransient && m_TransientPlacement == TransientPlacement::BottomRight) {
+        // Bitrate notices follow the stream window, not a dragged shortcuts button.
+        x = px + pw - w - 12;
+        y = py + ph - h - 12;
+    }
+    else if (anchoredTransient) {
+        x = px + (pw - w) / 2;
+        y = py + kDefaultTopMargin;
+    }
+    else if (m_HasCustomPosition) {
         x = px + m_OffsetX;
         y = py + m_OffsetY;
     }
@@ -1274,10 +1287,9 @@ void ShortcutMenu::updatePosition()
         y = py + kDefaultTopMargin;
     }
 
-    // Keep the whole menu inside the stream window so it can't get lost off-screen
-    // when the stream window is resized or moved to another display.
-    x = qMax(px, qMin(x, px + pw - w));
-    y = qMax(py, qMin(y, py + ph - h));
+    // Never shift the left/top edge out of view on small stream windows.
+    x = qMax(px, qMin(x, px + qMax(0, pw - w)));
+    y = qMax(py, qMin(y, py + qMax(0, ph - h)));
 
     int cx, cy;
     SDL_GetWindowPosition(m_Window, &cx, &cy);

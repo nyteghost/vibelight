@@ -475,6 +475,16 @@ void SystemProperties::setAutoBitrate(bool enabled)
     QSettings().setValue("vibelight/autoBitrate", enabled);
 }
 
+int SystemProperties::autoBitrateNotificationPosition()
+{
+    return QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt() == 1 ? 1 : 0;
+}
+
+void SystemProperties::setAutoBitrateNotificationPosition(int position)
+{
+    QSettings().setValue("vibelight/autoBitrateNotificationPosition", position == 1 ? 1 : 0);
+}
+
 QString SystemProperties::problemReportUrl()
 {
     QString body;

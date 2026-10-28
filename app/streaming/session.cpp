@@ -2074,6 +2074,19 @@ void Session::tickAutoBitrate()
         return;
     }
 
+    // This runs on the SDL event-loop thread. Display bitrate messages without
+    // routing them through the shared file/clipboard status queue.
+    const auto showBitrateNotice = [this](const char* message, unsigned int ms) {
+        if (m_ShortcutMenu == nullptr) {
+            return;
+        }
+        const int position = QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt();
+        m_ShortcutMenu->showTransient(
+            message, ms,
+            position == 1 ? ShortcutMenu::TransientPlacement::BottomRight
+                          : ShortcutMenu::TransientPlacement::TopCenter);
+    };
+
     const unsigned int now = SDL_GetTicks();
     if (now - m_AutoBrNextTick >= 0x80000000u) {
         return;
@@ -2099,10 +2112,7 @@ void Session::tickAutoBitrate()
             if (++m_AutoBrFailures >= 2) {
                 m_AutoBrEnabled = false;
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
-                QMutexLocker locker(&m_Upload->lock);
-                m_Upload->message = "Automatic bitrate paused: this host didn't accept the change";
-                m_Upload->messageMs = 7000;
-                m_Upload->messageReady = true;
+                showBitrateNotice("Automatic bitrate paused: this host didn't accept the change", 7000);
                 return;
             }
         }
@@ -2114,14 +2124,11 @@ void Session::tickAutoBitrate()
             m_AutoBr->syncAppliedMbps(result / 1000.0);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: host confirmed %d kbps", result);
             if (result != previousKbps) {
-                QMutexLocker locker(&m_Upload->lock);
                 char buf[160];
                 SDL_snprintf(buf, sizeof(buf), "Bitrate %s to %.1f Mbps (host confirmed)",
                              result < previousKbps ? "lowered" : "raised",
                              result / 1000.0);
-                m_Upload->message = buf;
-                m_Upload->messageMs = 4000;
-                m_Upload->messageReady = true;
+                showBitrateNotice(buf, 4000);
             }
         }
     }

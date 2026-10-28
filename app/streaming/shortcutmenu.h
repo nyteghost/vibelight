@@ -44,8 +44,11 @@ public:
     void tick();
     bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_GraphEnabled; }
 
-    // Short status text shown on the button (used for file drop progress)
-    void showTransient(const std::string& message, unsigned int durationMs);
+    // Notifications normally use the shortcuts button's position. Bitrate
+    // notifications can instead be anchored to the stream window.
+    enum class TransientPlacement { AtButton, TopCenter, BottomRight };
+    void showTransient(const std::string& message, unsigned int durationMs,
+                       TransientPlacement placement = TransientPlacement::AtButton);
 
 private:
     // The menu opens on the root page, which lists the other pages as categories
@@ -198,6 +201,7 @@ private:
     unsigned int m_TransientUntil; // SDL tick deadline, 0 when no message is showing
     std::string m_TransientMessage;
     bool m_TransientOwnsReveal;
+    TransientPlacement m_TransientPlacement = TransientPlacement::AtButton;
     bool m_SwallowEscUp;
     unsigned int m_ExpandedAt; // SDL tick when the menu last opened
 

@@ -2080,25 +2080,50 @@ void Session::tickAutoBitrate()
     }
     m_AutoBrNextTick = now + 5000;
 
-    // Result of the previous change request?
+    // Reconcile only completed requests. Do not clear the busy marker (-2):
+    // the worker may still be updating this atomic on another thread.
     int result = m_AutoBrResult->load();
     if (result == -2) {
-        return;     // still running
+        return;
     }
-    m_AutoBrResult->store(0);
-    if (result == -1) {
-        if (++m_AutoBrFailures >= 2) {
-            m_AutoBrEnabled = false;
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
-            QMutexLocker locker(&m_Upload->lock);
-            m_Upload->message = "Automatic bitrate paused: this host didn't accept the change";
-            m_Upload->messageMs = 7000;
-            m_Upload->messageReady = true;
+    if (result != 0) {
+        int expected = result;
+        if (!m_AutoBrResult->compare_exchange_strong(expected, 0)) {
             return;
         }
-    }
-    else if (result > 0) {
-        m_AutoBrFailures = 0;
+
+        if (result == -1) {
+            // update() made a tentative decision; the host did not accept it.
+            // Keep the next decision based on the last confirmed bitrate.
+            m_AutoBr->syncAppliedMbps(m_AutoBrLastKbps / 1000.0);
+            if (++m_AutoBrFailures >= 2) {
+                m_AutoBrEnabled = false;
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
+                QMutexLocker locker(&m_Upload->lock);
+                m_Upload->message = "Automatic bitrate paused: this host didn't accept the change";
+                m_Upload->messageMs = 7000;
+                m_Upload->messageReady = true;
+                return;
+            }
+        }
+        else if (result > 0) {
+            m_AutoBrFailures = 0;
+            const int previousKbps = m_AutoBrLastKbps;
+            m_AutoBrLastKbps = result;
+            // The server can clamp a request to its configured maximum.
+            m_AutoBr->syncAppliedMbps(result / 1000.0);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: host confirmed %d kbps", result);
+            if (result != previousKbps) {
+                QMutexLocker locker(&m_Upload->lock);
+                char buf[160];
+                SDL_snprintf(buf, sizeof(buf), "Bitrate %s to %.1f Mbps (host confirmed)",
+                             result < previousKbps ? "lowered" : "raised",
+                             result / 1000.0);
+                m_Upload->message = buf;
+                m_Upload->messageMs = 4000;
+                m_Upload->messageReady = true;
+            }
+        }
     }
 
     CONNECTION_SNAPSHOT snap = {};
@@ -2144,20 +2169,9 @@ void Session::tickAutoBitrate()
     }
 
     const int kbps = (int)(next * 1000);
-    const int previousKbps = m_AutoBrLastKbps;
-    m_AutoBrLastKbps = kbps;
-    {
-        QMutexLocker locker(&m_Upload->lock);
-        char buf[160];
-        SDL_snprintf(buf, sizeof(buf), "Bitrate %s to %d Mbps (%s)",
-                     kbps < previousKbps ? "lowered" : "raised",
-                     kbps / 1000,
-                     sample.dropPercent >= 1.5 ? "dropping frames" : "connection is clean");
-        m_Upload->message = buf;
-        m_Upload->messageMs = 4000;
-        m_Upload->messageReady = true;
-    }
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: %d kbps (%.1f%% dropped)", kbps, sample.dropPercent);
+    // Do not update the confirmed bitrate or show a success message until
+    // setRuntimeBitrate() returns the host's applied value.
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: requesting %d kbps (%.1f%% dropped)", kbps, sample.dropPercent);
 
     const NvAddress address = m_Computer->activeAddress;
     const uint16_t httpsPort = m_Computer->activeHttpsPort;

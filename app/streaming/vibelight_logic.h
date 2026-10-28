@@ -127,6 +127,17 @@ public:
 
     double currentMbps() const { return m_Current; }
 
+    // update() makes a tentative decision before the network request completes.
+    // Reconcile that decision with the bitrate the host actually accepted, or
+    // restore the last confirmed bitrate when the request fails. Do not enforce
+    // the local floor here: a host can legitimately clamp below it.
+    void syncAppliedMbps(double actualMbps)
+    {
+        if (std::isfinite(actualMbps) && actualMbps > 0.0) {
+            m_Current = (std::min)(m_Ceiling, actualMbps);
+        }
+    }
+
     // dropPercent: frames lost on the network during this window. decoderBound: the PC, not the
     // network, is the limit (changing the bitrate won't help). Returns the new bitrate in Mbps,
     // or 0 if nothing should change.

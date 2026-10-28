@@ -10,7 +10,8 @@ Shortcuts menu (Ctrl+Alt+Shift+H)
 - Clipboard sync: send your clipboard text to the host or get the host's, from the Clipboard page (needs Vibepollo or another Apollo-style host).
 - File drop: drag a file onto the stream window to send it to the host's receive folder (needs Vibebeam with "Upload files" allowed for this client). The button shows the progress.
 - Two-factor code: if the host turns on "Require 2FA to connect", Vibelight asks for the six-digit code when you start or resume a stream (needs Vibebeam).
-- Choose monitor: right-click a PC and pick which monitor it streams (needs Vibebeam beta.9 or newer; other hosts keep their own choice).
+- Choose monitor: right-click a PC and pick which monitor it streams, or ask for a virtual display (needs Vibebeam beta.9 or newer; other hosts keep their own choice).
+- Second monitor window: Shortcuts menu > Tools > Open second monitor window opens another Vibelight window showing the host's Remote Monitor (an extra display), next to your main stream. The second window stays silent and leaves gamepads, clipboard sync and automatic bitrate to the main window (needs a Vibebeam host).
 - Automatic bitrate (off by default, in Settings): lowers the video bitrate when frames are being lost and raises it again slowly once the connection is clean, never above the bitrate you chose (needs Vibebeam or another Apollo-style host). Check connection also tells a slow network from a slow PC.
 - Automatic clipboard sync (optional, off by default): turn it on in Settings and Ctrl+C on one side is ready to Ctrl+V on the other. Text only, up to 1 MB, needs a Vibebeam host.
 - Get host clipboard: Ctrl+Alt+Shift+C (hide/show cursor moved to U).

@@ -34,6 +34,7 @@
 
 #include <QtEndian>
 #include <QSettings>
+#include <QProcess>
 #include <QDeadlineTimer>
 #include <cstring>
 #include <QCoreApplication>
@@ -582,7 +583,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_Window(nullptr),
       m_VideoDecoder(nullptr),
       m_DecoderLock(SDL_CreateMutex()),
-      m_AudioMuted(false),
+      m_AudioMuted(isSecondaryWindow()),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_InputHandler(nullptr),
@@ -2018,11 +2019,44 @@ void Session::startAutoClipboardOp(bool pull, const QString& text)
 // Automatic clipboard sync, called from the stream loop on the SDL thread. Everything stays
 // on the clipboard of this PC and the host while streaming: a copy on either side is
 // sent to the other within about a second or two. The clipboard text is never logged.
+bool Session::openSecondMonitorWindow(QString& error)
+{
+    if (isSecondaryWindow()) {
+        error = tr("This is already the second window.");
+        return false;
+    }
+    if (m_Computer->vibebeamFeatures.isEmpty()) {
+        error = tr("A second monitor window needs a Vibebeam host.");
+        return false;
+    }
+
+    // The host's built-in app that streams an extra display; renamed hosts can change it here
+    const QString appName = QSettings().value("vibelight/secondMonitorApp", "Remote Monitor").toString();
+
+    QStringList args;
+    args << "stream" << m_Computer->uuid << appName
+         << "--display-mode" << "windowed"
+         << "--no-quit-after";
+
+    QProcess process;
+    process.setProgram(QCoreApplication::applicationFilePath());
+    process.setArguments(args);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("VIBELIGHT_SECONDARY", "1");
+    process.setProcessEnvironment(env);
+    if (!process.startDetached()) {
+        error = tr("Couldn't start the second window (%1)").arg(process.errorString());
+        return false;
+    }
+    return true;
+}
+
 void Session::tickAutoBitrate()
 {
     if (!m_AutoBrStarted) {
         m_AutoBrStarted = true;
-        m_AutoBrEnabled = QSettings().value("vibelight/autoBitrate", false).toBool() &&
+        m_AutoBrEnabled = !isSecondaryWindow() &&
+                          QSettings().value("vibelight/autoBitrate", false).toBool() &&
                           !m_Computer->isNvidiaServerSoftware &&
                           m_StreamConfig.bitrate > 0;
         if (m_AutoBrEnabled) {
@@ -2148,7 +2182,8 @@ void Session::tickClipboardSync()
 {
     if (!m_ClipAutoStarted) {
         m_ClipAutoStarted = true;
-        m_ClipAutoEnabled = QSettings().value("vibelight/clipboardAutoSync", false).toBool() &&
+        m_ClipAutoEnabled = !isSecondaryWindow() &&
+                            QSettings().value("vibelight/clipboardAutoSync", false).toBool() &&
                             m_Computer->vibebeamFeatures.contains("clipboard") &&
                             !m_Computer->isNvidiaServerSoftware;
         if (m_ClipAutoEnabled) {
@@ -2731,13 +2766,13 @@ void Session::exec()
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
-                if (m_Preferences->muteOnFocusLoss) {
+                if (m_Preferences->muteOnFocusLoss && !isSecondaryWindow()) {
                     m_AudioMuted = true;
                 }
                 m_InputHandler->notifyFocusLost();
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
-                if (m_Preferences->muteOnFocusLoss) {
+                if (m_Preferences->muteOnFocusLoss && !isSecondaryWindow()) {
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();

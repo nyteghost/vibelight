@@ -438,6 +438,9 @@ void ShortcutMenu::buildItems()
 
     // Tools & session
     special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
+    if (!Session::isSecondaryWindow()) {
+        special(PageTools, "Open second monitor window", "Remote Monitor", KindSecondWindow);
+    }
 #ifdef Q_OS_WIN32
     special(PageTools, "Screenshot of stream", "saves a PNG", KindScreenshot);
     special(PageTools, "Latency graph", m_GraphEnabled ? "on" : "off", KindToggleGraph);
@@ -1493,6 +1496,18 @@ void ShortcutMenu::execute(const Item& itemRef)
 
     if (item.kind == KindConnectionCheck) {
         startConnectionCheck();
+        return;
+    }
+
+    if (item.kind == KindSecondWindow) {
+        Session* session = Session::get();
+        QString error;
+        if (session != nullptr && session->openSecondMonitorWindow(error)) {
+            showTransient("Opening the second monitor window...", 5000);
+        }
+        else {
+            showTransient(error.isEmpty() ? std::string("Couldn't open the second window") : error.toStdString(), 6000);
+        }
         return;
     }
 

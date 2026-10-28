@@ -100,7 +100,7 @@ public:
                 if (-1 != index) {
                     app = m_Computer->appList[index];
                     m_TimeoutTimer->stop();
-                    if (isNotStreaming() || isStreamingApp(app)) {
+                    if (isNotStreaming() || isStreamingApp(app) || qEnvironmentVariableIntValue("VIBELIGHT_SECONDARY") == 1) {
                         m_State = StateStartSession;
                         session = new Session(m_Computer, app, m_Preferences);
                         emit q->sessionCreated(app.name, session);

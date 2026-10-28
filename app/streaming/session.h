@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include <QtGlobal>
 #include <QMutex>
 #include <QWaitCondition>
 #include <QThread>
@@ -128,6 +129,19 @@ public:
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
                         bool& isHdrSupported, QSize& maxResolution);
+
+    // True in the extra window opened from the shortcuts menu ("Open second monitor window").
+    // That window shows another monitor only: it never plays audio, reads gamepads, syncs the
+    // clipboard or changes the bitrate, so the first window stays the only one doing those.
+    static bool isSecondaryWindow()
+    {
+        static const bool secondary = qEnvironmentVariableIntValue("VIBELIGHT_SECONDARY") == 1;
+        return secondary;
+    }
+
+    // Starts a second Vibelight window streaming the host's Remote Monitor. Returns false with a
+    // short explanation if it can't be started.
+    bool openSecondMonitorWindow(QString& error);
 
     static Session* get()
     {

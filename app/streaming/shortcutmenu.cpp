@@ -15,6 +15,8 @@
 #include <QStringList>
 #include <QUrl>
 #include <QSettings>
+#include <QThread>
+#include <QUuid>
 
 #include <Limelight.h>
 
@@ -26,6 +28,8 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <utility>
 
 #ifdef Q_OS_WIN32
 #ifndef NOMINMAX
@@ -105,6 +109,15 @@ bool pointInRect(const SDL_Rect& r, int x, int y)
 }
 
 } // namespace
+
+#ifdef Q_OS_WIN32
+struct ScreenshotSaveState {
+    std::mutex mutex;
+    bool finished = false;
+    std::string notification;
+    QString savedPath;
+};
+#endif
 
 bool ShortcutMenu::isSupportedOnThisPlatform()
 {
@@ -967,6 +980,30 @@ void ShortcutMenu::endTransient()
 void ShortcutMenu::tick()
 {
     pollClipboard();
+
+#ifdef Q_OS_WIN32
+    if (m_ScreenshotSaveState) {
+        bool finished = false;
+        std::string message;
+        QString savedPath;
+        {
+            std::lock_guard<std::mutex> lock(m_ScreenshotSaveState->mutex);
+            finished = m_ScreenshotSaveState->finished;
+            if (finished) {
+                message = m_ScreenshotSaveState->notification;
+                savedPath = m_ScreenshotSaveState->savedPath;
+            }
+        }
+        if (finished) {
+            m_ScreenshotSaveState.reset();
+            if (!savedPath.isEmpty()) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s",
+                            savedPath.toUtf8().constData());
+            }
+            showTransient(message, savedPath.isEmpty() ? 3000 : 2500);
+        }
+    }
+#endif
 
     if (m_ScreenshotAt != 0 && (int)(SDL_GetTicks() - m_ScreenshotAt) >= 0) {
         m_ScreenshotAt = 0;
@@ -2156,6 +2193,10 @@ void ShortcutMenu::render()
 
 void ShortcutMenu::captureScreenshot()
 {
+    if (m_ScreenshotSaveState) {
+        showTransient("Screenshot is still being saved", 2000);
+        return;
+    }
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(m_Parent, &info)) {
@@ -2179,6 +2220,10 @@ void ShortcutMenu::captureScreenshot()
 
     // Copy the stream area off the composed desktop
     QImage image(w, h, QImage::Format_RGB32);
+    if (image.isNull()) {
+        showTransient("Screenshot failed: out of memory", 3000);
+        return;
+    }
     bool ok = false;
     HDC screen = GetDC(nullptr);
     HDC mem = CreateCompatibleDC(screen);
@@ -2212,20 +2257,41 @@ void ShortcutMenu::captureScreenshot()
         return;
     }
 
-    QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
-    if (!folder.mkpath("Vibelight")) {
-        showTransient("Can't create the Pictures\\Vibelight folder", 3000);
-        return;
-    }
-    const QString file = folder.filePath("Vibelight/Vibelight-" +
-                                         QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".png");
-    if (!image.save(file, "PNG")) {
-        showTransient("Couldn't save the screenshot", 3000);
-        return;
-    }
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s", file.toUtf8().constData());
-    showTransient("Saved to Pictures\\Vibelight", 3000);
+    // PNG compression can stall the SDL event loop, delaying input and video.
+    // Capture pixels here, then do filesystem work and encoding in a worker.
+    // The worker only owns the image and shared completion state: it never
+    // references the ShortcutMenu, SDL window, or its lifetime.
+    auto state = std::make_shared<ScreenshotSaveState>();
+    m_ScreenshotSaveState = state;
+    QThread* thread = QThread::create([state, image = std::move(image)]() mutable {
+        std::string message;
+        QString savedPath;
+        QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
+        if (!folder.mkpath("Vibelight")) {
+            message = "Can't create the Pictures\\Vibelight folder";
+        }
+        else {
+            // Milliseconds + a random suffix prevent collisions from quick saves.
+            const QString file = folder.filePath(
+                "Vibelight/Vibelight-" +
+                QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + "-" +
+                QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".png");
+            if (image.save(file, "PNG")) {
+                savedPath = file;
+                message = "Saved to Pictures\\Vibelight";
+            }
+            else {
+                message = "Couldn't save the screenshot";
+            }
+        }
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->notification = std::move(message);
+        state->savedPath = std::move(savedPath);
+        state->finished = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+    showTransient("Saving screenshot...", 2000);
 }
 
 void ShortcutMenu::toggleGraph()

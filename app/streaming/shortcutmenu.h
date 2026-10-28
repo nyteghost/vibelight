@@ -5,11 +5,13 @@
 
 #include <QByteArray>
 #include <QString>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 class SdlInputHandler;
+struct ScreenshotSaveState;
 
 // A small, free-floating, always-on-top "Shortcuts" button that lives in its own
 // borderless SDL window next to the stream window. It stays hidden until the user
@@ -43,7 +45,7 @@ public:
 
     // Call regularly from the event loop; hides transient messages when they expire.
     void tick();
-    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_GraphEnabled; }
+    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
 
     // Notifications normally use the shortcuts button's position. Bitrate
     // notifications can instead be anchored to the stream window.
@@ -235,6 +237,8 @@ private:
 
     // Screenshot scheduled for this SDL tick (0 = none), so the menu can get out of the picture
     unsigned int m_ScreenshotAt = 0;
+    // Worker-owned screenshot saving state; never capture this/menu pointers in worker.
+    std::shared_ptr<ScreenshotSaveState> m_ScreenshotSaveState;
 
     // Latency graph
     bool m_GraphEnabled = false;

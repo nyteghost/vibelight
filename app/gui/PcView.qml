@@ -408,8 +408,8 @@ CenteredGridView {
         function monitorsReady(computerIndex, ids, names, current, error) {
             pcIndex = computerIndex
             problem = error
-            monitorIds = [""].concat(ids)
-            monitorCombo.model = [qsTr("Let the PC decide")].concat(names)
+            monitorIds = ["", "@virtual"].concat(ids)
+            monitorCombo.model = [qsTr("Let the PC decide"), qsTr("Virtual display")].concat(names)
             var at = monitorIds.indexOf(current)
             monitorCombo.currentIndex = at >= 0 ? at : 0
             open()
@@ -426,7 +426,7 @@ CenteredGridView {
         ColumnLayout {
             Label {
                 text: chooseMonitorDialog.problem ? chooseMonitorDialog.problem
-                                                  : qsTr("Which monitor should this PC stream? Applies the next time you start a stream.")
+                                                  : qsTr("Which monitor should this PC stream? \"Virtual display\" asks the host for a separate virtual screen. Applies the next time you start a stream.")
                 font.bold: true
                 wrapMode: Text.Wrap
                 Layout.maximumWidth: 420

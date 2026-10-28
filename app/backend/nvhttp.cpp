@@ -244,6 +244,7 @@ NvHTTP::startApp(QString verb,
                                    (twoFactorCode.isEmpty() ? QString() :
                                        "&vibebeam_2fa="+QString::fromLatin1(QUrl::toPercentEncoding(twoFactorCode)))+
                                    (monitorId.isEmpty() ? QString() :
+                                    monitorId == "@virtual" ? QString("&virtualDisplay=1") :
                                        "&vibeMonitor="+QString::fromLatin1(QUrl::toPercentEncoding(monitorId)))+
                                    LiGetLaunchUrlQueryParameters(),
                                    LAUNCH_TIMEOUT_MS);

@@ -74,6 +74,7 @@ private:
         KindOpenConfig, // open the custom shortcuts file in the default editor
         KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
+        KindPreviewBitrate, // display the user-chosen bitrate notification location
         KindClipboard,  // type one of the recent local clipboard entries on the remote PC
         KindClipPush,   // copy this PC's clipboard text to the host's clipboard
         KindClipPull,   // copy the host's clipboard text to this PC's clipboard

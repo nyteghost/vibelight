@@ -770,8 +770,15 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
         qWarning() << "[file] not sent:" << error;
         return false;
     }
-    const QByteArray body = file.readAll();
-    file.close();
+    // Keep the QFile open for the duration of the request. QNetworkAccessManager
+    // reads directly from this device instead of retaining a second, potentially
+    // 512 MiB, QByteArray in the client.
+    const qint64 uploadBytes = file.size();
+    if (uploadBytes != info.size() || uploadBytes < 0 || uploadBytes > kMaxUploadBytes) {
+        error = "the file changed size while preparing the upload; try again";
+        qWarning() << "[file] not sent:" << error << "path=" << localPath;
+        return false;
+    }
 
     QUrl url(m_BaseUrlHttps);
     url.setPath("/actions/upload");
@@ -785,6 +792,10 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
     QNetworkRequest request(url);
     request.setSslConfiguration(IdentityManager::get()->getSslConfig());
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+    // The host expects a fixed-size request body. Supplying Content-Length lets
+    // Qt stream from a seekable QFile without buffering the entire upload.
+    request.setHeader(QNetworkRequest::ContentLengthHeader, QVariant::fromValue<qint64>(uploadBytes));
+    request.setAttribute(QNetworkRequest::DoNotBufferUploadDataAttribute, true);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 #endif
@@ -792,7 +803,7 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
     request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
 #endif
 
-    qInfo() << "[file] uploading" << info.fileName() << "bytes=" << body.size()
+    qInfo() << "[file] uploading" << info.fileName() << "bytes=" << uploadBytes
             << "to" << url.host() + ":" + QString::number(url.port()) << "/actions/upload";
     QElapsedTimer timer;
     timer.start();
@@ -805,7 +816,9 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
         }
     });
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
-    QNetworkReply* reply = m_Nam->post(request, body);
+    // QFile and QNetworkAccessManager live on the same worker thread. The file
+    // remains open until the reply has finished or has been aborted/deleted.
+    QNetworkReply* reply = m_Nam->post(request, &file);
 
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);

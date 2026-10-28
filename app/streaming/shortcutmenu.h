@@ -66,6 +66,7 @@ private:
         KindHostText,   // type a string on the remote PC
         KindClient,     // one of Vibelight's own Ctrl+Alt+Shift+key actions
         KindOpenConfig, // open the custom shortcuts file in the default editor
+        KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
         KindClipboard,  // type one of the recent local clipboard entries on the remote PC
         KindClipPush,   // copy this PC's clipboard text to the host's clipboard

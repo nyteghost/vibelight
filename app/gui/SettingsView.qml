@@ -1607,6 +1607,29 @@ Flickable {
                     ToolTip.text: qsTr("Lowers the bitrate when frames are being lost and raises it again, slowly, once the connection stays clean. It never goes above the bitrate you chose. Needs a Vibebeam host or another Apollo-style host; with a standard Sunshine host it turns itself off. Off by default. Takes effect the next time you start a stream.")
                 }
 
+                Row {
+                    spacing: 10
+                    width: parent.width
+
+                    Label {
+                        text: qsTr("Bitrate notification position:")
+                        font.pointSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    AutoResizingComboBox {
+                        id: autoBitrateNotificationPosition
+                        enabled: autoBitrateCheck.checked
+                        model: [qsTr("Top center"), qsTr("Bottom right")]
+                        currentIndex: SystemProperties.autoBitrateNotificationPosition()
+                        onActivated: SystemProperties.setAutoBitrateNotificationPosition(currentIndex)
+
+                        ToolTip.delay: 1000
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Choose where automatic bitrate change messages appear while streaming. Takes effect on the next notification.")
+                    }
+                }
+
                 CheckBox {
                     id: menuAutoHideCheck
                     width: parent.width

@@ -5,10 +5,13 @@
 
 #include <QByteArray>
 #include <QString>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class SdlInputHandler;
+struct ScreenshotSaveState;
 
 // A small, free-floating, always-on-top "Shortcuts" button that lives in its own
 // borderless SDL window next to the stream window. It stays hidden until the user
@@ -42,10 +45,13 @@ public:
 
     // Call regularly from the event loop; hides transient messages when they expire.
     void tick();
-    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_GraphEnabled; }
+    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
 
-    // Short status text shown on the button (used for file drop progress)
-    void showTransient(const std::string& message, unsigned int durationMs);
+    // Notifications normally use the shortcuts button's position. Bitrate
+    // notifications can instead be anchored to the stream window.
+    enum class TransientPlacement { AtButton, TopCenter, BottomRight };
+    void showTransient(const std::string& message, unsigned int durationMs,
+                       TransientPlacement placement = TransientPlacement::AtButton);
 
 private:
     // The menu opens on the root page, which lists the other pages as categories
@@ -158,6 +164,9 @@ private:
     SDL_Window* m_Window;
     TTF_Font* m_Font;
     TTF_Font* m_SmallFont;
+    // Bounded SDL-thread-only glyph cache. It stores rendered static labels
+    // instead of rerasterizing them on every mouse-move/menu redraw.
+    std::unordered_map<std::string, SDL_Surface*> m_TextCache;
     QByteArray m_FontData;
     bool m_TtfInitialized;
 
@@ -198,6 +207,7 @@ private:
     unsigned int m_TransientUntil; // SDL tick deadline, 0 when no message is showing
     std::string m_TransientMessage;
     bool m_TransientOwnsReveal;
+    TransientPlacement m_TransientPlacement = TransientPlacement::AtButton;
     bool m_SwallowEscUp;
     unsigned int m_ExpandedAt; // SDL tick when the menu last opened
 
@@ -227,6 +237,8 @@ private:
 
     // Screenshot scheduled for this SDL tick (0 = none), so the menu can get out of the picture
     unsigned int m_ScreenshotAt = 0;
+    // Worker-owned screenshot saving state; never capture this/menu pointers in worker.
+    std::shared_ptr<ScreenshotSaveState> m_ScreenshotSaveState;
 
     // Latency graph
     bool m_GraphEnabled = false;

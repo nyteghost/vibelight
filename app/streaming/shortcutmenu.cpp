@@ -15,6 +15,8 @@
 #include <QStringList>
 #include <QUrl>
 #include <QSettings>
+#include <QThread>
+#include <QUuid>
 
 #include <Limelight.h>
 
@@ -26,6 +28,8 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <utility>
 
 #ifdef Q_OS_WIN32
 #ifndef NOMINMAX
@@ -105,6 +109,15 @@ bool pointInRect(const SDL_Rect& r, int x, int y)
 }
 
 } // namespace
+
+#ifdef Q_OS_WIN32
+struct ScreenshotSaveState {
+    std::mutex mutex;
+    bool finished = false;
+    std::string notification;
+    QString savedPath;
+};
+#endif
 
 bool ShortcutMenu::isSupportedOnThisPlatform()
 {
@@ -219,6 +232,11 @@ ShortcutMenu::~ShortcutMenu()
     endDrag();
     destroyGraphWindow();
     overrideMinimizeOnFocusLoss(false);
+
+    for (auto& entry : m_TextCache) {
+        SDL_FreeSurface(entry.second);
+    }
+    m_TextCache.clear();
 
     if (m_Window != nullptr) {
         SDL_DestroyWindow(m_Window);
@@ -906,7 +924,7 @@ void ShortcutMenu::recordRecent(const Item& item)
     settings.setValue("vibelight/recentShortcuts", recents);
 }
 
-void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs)
+void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs, TransientPlacement placement)
 {
     if (m_Window == nullptr || m_Expanded) {
         // Never disturb an open menu
@@ -917,6 +935,7 @@ void ShortcutMenu::showTransient(const std::string& message, unsigned int durati
         m_TransientOwnsReveal = !m_Revealed;
     }
     m_TransientMessage = message;
+    m_TransientPlacement = placement;
     m_TransientUntil = SDL_GetTicks() + durationMs;
     if (m_TransientUntil == 0) {
         m_TransientUntil = 1;
@@ -941,6 +960,7 @@ void ShortcutMenu::endTransient()
     m_TransientUntil = 0;
     m_TransientOwnsReveal = false;
     m_TransientMessage.clear();
+    m_TransientPlacement = TransientPlacement::AtButton;
 
     if (m_Window == nullptr) {
         return;
@@ -960,6 +980,30 @@ void ShortcutMenu::endTransient()
 void ShortcutMenu::tick()
 {
     pollClipboard();
+
+#ifdef Q_OS_WIN32
+    if (m_ScreenshotSaveState) {
+        bool finished = false;
+        std::string message;
+        QString savedPath;
+        {
+            std::lock_guard<std::mutex> lock(m_ScreenshotSaveState->mutex);
+            finished = m_ScreenshotSaveState->finished;
+            if (finished) {
+                message = m_ScreenshotSaveState->notification;
+                savedPath = m_ScreenshotSaveState->savedPath;
+            }
+        }
+        if (finished) {
+            m_ScreenshotSaveState.reset();
+            if (!savedPath.isEmpty()) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s",
+                            savedPath.toUtf8().constData());
+            }
+            showTransient(message, savedPath.isEmpty() ? 3000 : 2500);
+        }
+    }
+#endif
 
     if (m_ScreenshotAt != 0 && (int)(SDL_GetTicks() - m_ScreenshotAt) >= 0) {
         m_ScreenshotAt = 0;
@@ -1265,7 +1309,18 @@ void ShortcutMenu::updatePosition()
     SDL_GetWindowSize(m_Window, &w, &h);
 
     int x, y;
-    if (m_HasCustomPosition) {
+    const bool anchoredTransient = m_TransientUntil != 0 && !m_Expanded &&
+                                   m_TransientPlacement != TransientPlacement::AtButton;
+    if (anchoredTransient && m_TransientPlacement == TransientPlacement::BottomRight) {
+        // Bitrate notices follow the stream window, not a dragged shortcuts button.
+        x = px + pw - w - 12;
+        y = py + ph - h - 12;
+    }
+    else if (anchoredTransient) {
+        x = px + (pw - w) / 2;
+        y = py + kDefaultTopMargin;
+    }
+    else if (m_HasCustomPosition) {
         x = px + m_OffsetX;
         y = py + m_OffsetY;
     }
@@ -1274,10 +1329,9 @@ void ShortcutMenu::updatePosition()
         y = py + kDefaultTopMargin;
     }
 
-    // Keep the whole menu inside the stream window so it can't get lost off-screen
-    // when the stream window is resized or moved to another display.
-    x = qMax(px, qMin(x, px + pw - w));
-    y = qMax(py, qMin(y, py + ph - h));
+    // Never shift the left/top edge out of view on small stream windows.
+    x = qMax(px, qMin(x, px + qMax(0, pw - w)));
+    y = qMax(py, qMin(y, py + qMax(0, ph - h)));
 
     int cx, cy;
     SDL_GetWindowPosition(m_Window, &cx, &cy);
@@ -1852,18 +1906,45 @@ bool ShortcutMenu::handleEvent(const SDL_Event& event)
 void ShortcutMenu::drawText(SDL_Surface* dst, TTF_Font* font, const char* text, SDL_Color color,
                             int x, int y, bool rightAlign)
 {
-    if (text == nullptr || text[0] == 0) {
+    if (text == nullptr || text[0] == 0 || font == nullptr || dst == nullptr) {
         return;
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
-    if (surface == nullptr) {
-        return;
+    // SDL_ttf glyph rendering can be expensive when the menu is redrawn on
+    // every hover transition. Cache text/color/font surfaces on the SDL thread.
+    // Limit entries so a long-running session with dynamic status text cannot
+    // grow memory without bound.
+    std::string key;
+    key.reserve(std::strlen(text) + 5);
+    key.push_back(font == m_Font ? 'M' : 'S');
+    key.push_back(static_cast<char>(color.r));
+    key.push_back(static_cast<char>(color.g));
+    key.push_back(static_cast<char>(color.b));
+    key.push_back(static_cast<char>(color.a));
+    key.append(text);
+
+    SDL_Surface* surface = nullptr;
+    auto found = m_TextCache.find(key);
+    if (found != m_TextCache.end()) {
+        surface = found->second;
+    }
+    else {
+        constexpr std::size_t maxCachedLabels = 192;
+        if (m_TextCache.size() >= maxCachedLabels) {
+            for (auto& entry : m_TextCache) {
+                SDL_FreeSurface(entry.second);
+            }
+            m_TextCache.clear();
+        }
+        surface = TTF_RenderUTF8_Blended(font, text, color);
+        if (surface == nullptr) {
+            return;
+        }
+        m_TextCache.emplace(std::move(key), surface);
     }
 
     SDL_Rect dstRect = { rightAlign ? x - surface->w : x, y, surface->w, surface->h };
     SDL_BlitSurface(surface, nullptr, dst, &dstRect);
-    SDL_FreeSurface(surface);
 }
 
 void ShortcutMenu::drawChevron(SDL_Surface* dst, int cx, int cy, bool up, Uint32 color)
@@ -2112,6 +2193,10 @@ void ShortcutMenu::render()
 
 void ShortcutMenu::captureScreenshot()
 {
+    if (m_ScreenshotSaveState) {
+        showTransient("Screenshot is still being saved", 2000);
+        return;
+    }
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(m_Parent, &info)) {
@@ -2135,6 +2220,10 @@ void ShortcutMenu::captureScreenshot()
 
     // Copy the stream area off the composed desktop
     QImage image(w, h, QImage::Format_RGB32);
+    if (image.isNull()) {
+        showTransient("Screenshot failed: out of memory", 3000);
+        return;
+    }
     bool ok = false;
     HDC screen = GetDC(nullptr);
     HDC mem = CreateCompatibleDC(screen);
@@ -2168,20 +2257,41 @@ void ShortcutMenu::captureScreenshot()
         return;
     }
 
-    QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
-    if (!folder.mkpath("Vibelight")) {
-        showTransient("Can't create the Pictures\\Vibelight folder", 3000);
-        return;
-    }
-    const QString file = folder.filePath("Vibelight/Vibelight-" +
-                                         QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".png");
-    if (!image.save(file, "PNG")) {
-        showTransient("Couldn't save the screenshot", 3000);
-        return;
-    }
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s", file.toUtf8().constData());
-    showTransient("Saved to Pictures\\Vibelight", 3000);
+    // PNG compression can stall the SDL event loop, delaying input and video.
+    // Capture pixels here, then do filesystem work and encoding in a worker.
+    // The worker only owns the image and shared completion state: it never
+    // references the ShortcutMenu, SDL window, or its lifetime.
+    auto state = std::make_shared<ScreenshotSaveState>();
+    m_ScreenshotSaveState = state;
+    QThread* thread = QThread::create([state, image = std::move(image)]() mutable {
+        std::string message;
+        QString savedPath;
+        QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
+        if (!folder.mkpath("Vibelight")) {
+            message = "Can't create the Pictures\\Vibelight folder";
+        }
+        else {
+            // Milliseconds + a random suffix prevent collisions from quick saves.
+            const QString file = folder.filePath(
+                "Vibelight/Vibelight-" +
+                QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + "-" +
+                QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".png");
+            if (image.save(file, "PNG")) {
+                savedPath = file;
+                message = "Saved to Pictures\\Vibelight";
+            }
+            else {
+                message = "Couldn't save the screenshot";
+            }
+        }
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->notification = std::move(message);
+        state->savedPath = std::move(savedPath);
+        state->finished = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+    showTransient("Saving screenshot...", 2000);
 }
 
 void ShortcutMenu::toggleGraph()

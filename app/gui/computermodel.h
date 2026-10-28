@@ -2,6 +2,7 @@
 #include "streaming/session.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 
 class ComputerModel : public QAbstractListModel
 {
@@ -62,5 +63,6 @@ private slots:
 
 private:
     QVector<NvComputer*> m_Computers;
+    QHash<QString, quint64> m_MonitorRequestGenerations;
     ComputerManager* m_ComputerManager;
 };

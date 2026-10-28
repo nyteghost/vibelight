@@ -199,6 +199,10 @@ public:
     bool
     uploadFile(const QString& localPath, QString& savedName, QString& error);
 
+    // Download the newest file from the host's explicitly shared receive
+    // folder (requires the host's Download files permission). Call on a worker.
+    bool downloadNewestHostFile(QString& savedPath, QString& error);
+
     QVector<NvApp>
     getAppList();
 

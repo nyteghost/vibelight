@@ -457,6 +457,7 @@ void ShortcutMenu::buildItems()
     // Tools & session
     special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
     special(PageTools, "Preview bitrate notification", "test notification position", KindPreviewBitrate);
+    special(PageTools, "Download newest host file", "Downloads/Vibelight", KindDownloadHostFile);
     if (!Session::isSecondaryWindow()) {
         special(PageTools, "Open second monitor window", "Remote Monitor", KindSecondWindow);
     }
@@ -1558,6 +1559,13 @@ void ShortcutMenu::execute(const Item& itemRef)
         const int position = QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt();
         showTransient("Bitrate notification preview (position test)", 4500,
                       position == 1 ? TransientPlacement::BottomRight : TransientPlacement::TopCenter);
+        return;
+    }
+
+    if (item.kind == KindDownloadHostFile) {
+        if (Session::get() != nullptr) {
+            Session::get()->startDownloadNewestHostFile();
+        }
         return;
     }
 

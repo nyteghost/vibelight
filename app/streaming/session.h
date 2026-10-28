@@ -172,6 +172,8 @@ public:
     // Drag-and-drop: send a file dropped on the stream window to the host in the background.
     // The newest status line ("Sending a.txt...", "Sent a.txt") is picked up by the stream loop.
     void queueFileUpload(const QString& path);
+    // Download the newest host-shared file to Downloads/Vibelight on a worker.
+    void startDownloadNewestHostFile();
     bool takeUploadMessage(std::string& message, unsigned int& durationMs);
 
     // Clipboard sync without blocking the stream loop: the request runs on a worker thread and
@@ -347,6 +349,7 @@ private:
         QMutex lock;
         QStringList queue;
         bool running = false;
+        bool downloadBusy = false;
         bool messageReady = false;
         std::string message;
         unsigned int messageMs = 0;

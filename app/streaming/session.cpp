@@ -1906,6 +1906,42 @@ void Session::queueFileUpload(const QString& path)
     thread->start();
 }
 
+void Session::startDownloadNewestHostFile()
+{
+    auto state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->downloadBusy) {
+            state->message = "A host file download is already in progress";
+            state->messageMs = 3000;
+            state->messageReady = true;
+            return;
+        }
+        state->downloadBusy = true;
+        state->message = "Downloading the newest host file...";
+        state->messageMs = 60000;
+        state->messageReady = true;
+    }
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid]() {
+        NvHTTP http(address, port, certificate, trueUid);
+        QString destination, error;
+        const bool ok = http.downloadNewestHostFile(destination, error);
+        QMutexLocker locker(&state->lock);
+        state->downloadBusy = false;
+        state->message = ok ? ("Downloaded to " + destination).toStdString()
+                            : ("Host download: " + error).toStdString();
+        state->messageMs = ok ? 7000 : 8000;
+        state->messageReady = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 void Session::startHostClipboardPush(const QString& text)
 {
     std::shared_ptr<UploadState> state = m_Upload;

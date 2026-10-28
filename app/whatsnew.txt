@@ -23,6 +23,7 @@ Security
 - Releases now carry a build provenance attestation. Check a download with `gh attestation verify <file> -R nyteghost/vibelight` (see SECURITY.md).
 
 Fixes
+- The second monitor window no longer reuses the monitor you picked for the main window, so it can show a different screen.
 - Auto-reconnect no longer hangs waiting for a two-factor code when nobody is there. It stops and tells you to start the stream again. The code prompt also gives up after 3 minutes.
 
 Connection

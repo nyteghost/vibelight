@@ -1671,7 +1671,8 @@ bool Session::startConnectionAsync()
 
     // The monitor chosen for this PC in its right-click menu (Vibebeam hosts only)
     QString monitorId;
-    if (m_Computer->vibebeamFeatures.contains("monitors")) {
+    // The second window shows the host's Remote Monitor and must never reuse the main window's choice
+    if (m_Computer->vibebeamFeatures.contains("monitors") && !isSecondaryWindow()) {
         monitorId = QSettings().value("vibelight/monitor/" + m_Computer->uuid).toString();
     }
 

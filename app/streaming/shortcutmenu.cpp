@@ -1573,7 +1573,7 @@ void ShortcutMenu::execute(const Item& itemRef)
         Session* session = Session::get();
         QString error;
         if (session != nullptr && session->openSecondMonitorWindow(error)) {
-            showTransient("Opening the second monitor window...", 5000);
+            showTransient(error.isEmpty() ? "Opening the second monitor window..." : error.toStdString(), 5000);
         }
         else {
             showTransient(error.isEmpty() ? std::string("Couldn't open the second window") : error.toStdString(), 6000);

@@ -2074,9 +2074,24 @@ void Session::startAutoClipboardOp(bool pull, const QString& text)
 // On Windows, activate the existing stream window when possible.
 #ifdef Q_OS_WIN32
 namespace {
-bool secondaryProcessIsRunning(qint64 pid)
+quint64 secondaryProcessBirthTime(qint64 pid)
 {
-    if (pid <= 0 || pid > 0xFFFFFFFFLL) {
+    if (pid <= 0 || pid > 0xFFFFFFFFLL) return 0;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!process) return 0;
+    FILETIME created {}, exited {}, kernel {}, user {};
+    const bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user);
+    CloseHandle(process);
+    if (!ok) return 0;
+    ULARGE_INTEGER result {};
+    result.LowPart = created.dwLowDateTime;
+    result.HighPart = created.dwHighDateTime;
+    return result.QuadPart;
+}
+
+bool secondaryProcessIsRunning(qint64 pid, quint64 expectedBirth)
+{
+    if (pid <= 0 || pid > 0xFFFFFFFFLL || expectedBirth == 0) {
         return false;
     }
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
@@ -2084,10 +2099,16 @@ bool secondaryProcessIsRunning(qint64 pid)
     if (!process) {
         return false;
     }
+    FILETIME created {}, exited {}, kernel {}, user {};
     const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    const bool timed = running && GetProcessTimes(process, &created, &exited, &kernel, &user);
+    ULARGE_INTEGER born {};
+    born.LowPart = created.dwLowDateTime;
+    born.HighPart = created.dwHighDateTime;
     wchar_t filename[32768] = {};
     DWORD length = static_cast<DWORD>(sizeof(filename) / sizeof(filename[0]));
-    const bool identified = running && QueryFullProcessImageNameW(process, 0, filename, &length);
+    const bool identified = timed && born.QuadPart == expectedBirth &&
+                            QueryFullProcessImageNameW(process, 0, filename, &length);
     CloseHandle(process);
     return identified &&
            QFileInfo(QString::fromWCharArray(filename, static_cast<int>(length))).canonicalFilePath()
@@ -2151,6 +2172,7 @@ bool Session::openSecondMonitorWindow(QString& error)
     const QString hostUuid = m_Computer->uuid;
     QSettings settings;
     const QString key = "vibelight/secondaryWindowPid/" + hostUuid;
+    const QString birthKey = "vibelight/secondaryWindowBirth/" + hostUuid;
     const QString lockDirectory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (!QDir().mkpath(lockDirectory)) {
         error = tr("Couldn't access the Vibelight runtime folder.");
@@ -2168,13 +2190,16 @@ bool Session::openSecondMonitorWindow(QString& error)
     settings.sync();
 #ifdef Q_OS_WIN32
     const qint64 previousPid = settings.value(key).toLongLong();
-    if (secondaryProcessIsRunning(previousPid)) {
+    const quint64 previousBirth = settings.value(birthKey).toULongLong();
+    if (secondaryProcessIsRunning(previousPid, previousBirth)) {
         focusSecondaryWindow(previousPid);
+        error = tr("Focused the existing Remote Monitor window.");
         return true;
     }
 #endif
     // A dead or reused PID is no longer evidence of an open Remote Monitor.
     settings.remove(key);
+    settings.remove(birthKey);
 
     QStringList args;
     args << "stream" << hostUuid << appName
@@ -2194,6 +2219,9 @@ bool Session::openSecondMonitorWindow(QString& error)
     }
     if (launchedPid > 0) {
         settings.setValue(key, launchedPid);
+#ifdef Q_OS_WIN32
+        settings.setValue(birthKey, secondaryProcessBirthTime(launchedPid));
+#endif
         settings.sync();
     }
     return true;

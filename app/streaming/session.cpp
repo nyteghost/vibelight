@@ -1671,14 +1671,17 @@ bool Session::startConnectionAsync()
 
     // The monitor chosen for this PC in its right-click menu (Vibebeam hosts only)
     QString monitorId;
-    if (m_Computer->vibebeamFeatures.contains("monitors")) {
+    // The second window shows the host's Remote Monitor and must never reuse the main window's choice
+    if (m_Computer->vibebeamFeatures.contains("monitors") && !isSecondaryWindow()) {
         monitorId = QSettings().value("vibelight/monitor/" + m_Computer->uuid).toString();
     }
 
     for (int attempt = 0;; attempt++) {
         try {
             NvHTTP http(m_Computer);
-            http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
+            // The second window starts the host's Remote Monitor with "launch". "resume" would just rejoin
+            // the running game and show the same screen as the main window.
+            http.startApp((m_Computer->currentGameId != 0 && !isSecondaryWindow()) ? "resume" : "launch",
                           m_Computer->isNvidiaServerSoftware,
                           m_App.id, &m_StreamConfig,
                           enableGameOptimizations,

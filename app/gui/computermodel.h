@@ -45,9 +45,15 @@ public:
 
     Q_INVOKABLE Session* createSessionForCurrentGame(int computerIndex);
 
+    // Monitor picker (Vibebeam hosts): asks the host which monitors it offers, then emits
+    // monitorsReady. The choice is remembered per PC; an empty id means the host's own choice.
+    Q_INVOKABLE void chooseMonitorForComputer(int computerIndex);
+    Q_INVOKABLE void setMonitorForComputer(int computerIndex, QString monitorId);
+
 signals:
     void pairingCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
+    void monitorsReady(int computerIndex, QStringList ids, QStringList names, QString current, QString error);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);

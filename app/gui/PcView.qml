@@ -79,6 +79,7 @@ CenteredGridView {
         model.initialize(ComputerManager)
         model.pairingCompleted.connect(pairingComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
+        model.monitorsReady.connect(chooseMonitorDialog.monitorsReady)
         return model
     }
 
@@ -191,6 +192,12 @@ CenteredGridView {
                         computerModel.testConnectionForComputer(index)
                         testConnectionDialog.open()
                     }
+                }
+
+                NavigableMenuItem {
+                    text: qsTr("Choose Monitor...")
+                    onTriggered: computerModel.chooseMonitorForComputer(index)
+                    visible: model.online && model.paired
                 }
 
                 NavigableMenuItem {
@@ -388,6 +395,48 @@ CenteredGridView {
                 Keys.onEnterPressed: {
                     renamePcDialog.accept()
                 }
+            }
+        }
+    }
+
+    NavigableDialog {
+        id: chooseMonitorDialog
+        property int pcIndex: -1
+        property string problem: ""
+        property var monitorIds: []
+
+        function monitorsReady(computerIndex, ids, names, current, error) {
+            pcIndex = computerIndex
+            problem = error
+            monitorIds = [""].concat(ids)
+            monitorCombo.model = [qsTr("Let the PC decide")].concat(names)
+            var at = monitorIds.indexOf(current)
+            monitorCombo.currentIndex = at >= 0 ? at : 0
+            open()
+        }
+
+        standardButtons: problem ? Dialog.Ok : (Dialog.Ok | Dialog.Cancel)
+
+        onAccepted: {
+            if (!problem && pcIndex >= 0) {
+                computerModel.setMonitorForComputer(pcIndex, monitorIds[monitorCombo.currentIndex])
+            }
+        }
+
+        ColumnLayout {
+            Label {
+                text: chooseMonitorDialog.problem ? chooseMonitorDialog.problem
+                                                  : qsTr("Which monitor should this PC stream? Applies the next time you start a stream.")
+                font.bold: true
+                wrapMode: Text.Wrap
+                Layout.maximumWidth: 420
+            }
+
+            ComboBox {
+                id: monitorCombo
+                visible: !chooseMonitorDialog.problem
+                Layout.fillWidth: true
+                focus: true
             }
         }
     }

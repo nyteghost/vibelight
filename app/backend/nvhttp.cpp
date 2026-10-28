@@ -1,3 +1,4 @@
+#include <QRegularExpression>
 #include "nvcomputer.h"
 #include <Limelight.h>
 
@@ -210,7 +211,8 @@ NvHTTP::startApp(QString verb,
                  int gamepadMask,
                  bool persistGameControllersOnDisconnect,
                  QString& rtspSessionUrl,
-                 const QString& twoFactorCode)
+                 const QString& twoFactorCode,
+                 const QString& monitorId)
 {
     int riKeyId;
 
@@ -241,6 +243,8 @@ NvHTTP::startApp(QString verb,
                                    "&gcpersist="+QString::number(persistGameControllersOnDisconnect ? 1 : 0)+
                                    (twoFactorCode.isEmpty() ? QString() :
                                        "&vibebeam_2fa="+QString::fromLatin1(QUrl::toPercentEncoding(twoFactorCode)))+
+                                   (monitorId.isEmpty() ? QString() :
+                                       "&vibeMonitor="+QString::fromLatin1(QUrl::toPercentEncoding(monitorId)))+
                                    LiGetLaunchUrlQueryParameters(),
                                    LAUNCH_TIMEOUT_MS);
 
@@ -561,6 +565,179 @@ NvHTTP::clipboardRequest(bool post, const QByteArray& body, QByteArray& response
         return false;
     }
 
+    return true;
+}
+
+bool
+NvHTTP::getMonitors(QStringList& ids, QStringList& names, QString& error)
+{
+    ids.clear();
+    names.clear();
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/vibebeam/monitors");
+    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex());
+
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+#endif
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) {
+        reply->abort();
+    }
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+    m_Nam->clearAccessCache();
+#endif
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    delete reply;
+
+    if (timedOut) {
+        error = "the host didn't answer";
+        return false;
+    }
+    if (status == 404) {
+        error = "this host doesn't offer a monitor choice (it needs Vibebeam)";
+        return false;
+    }
+    if (status == 401 || status == 403) {
+        error = "the host refused the request";
+        return false;
+    }
+    if (status != 200) {
+        error = "request failed (" + QString::number(status) + ")";
+        return false;
+    }
+
+    // <root status_code="200"><monitor><id>..</id><name>..</name></monitor>...</root>
+    QXmlStreamReader xml(body);
+    QString id, name;
+    bool inMonitor = false;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement()) {
+            if (xml.name() == QLatin1String("monitor")) {
+                inMonitor = true;
+                id.clear();
+                name.clear();
+            }
+            else if (inMonitor && xml.name() == QLatin1String("id")) {
+                id = xml.readElementText();
+            }
+            else if (inMonitor && xml.name() == QLatin1String("name")) {
+                name = xml.readElementText();
+            }
+        }
+        else if (xml.isEndElement() && xml.name() == QLatin1String("monitor")) {
+            inMonitor = false;
+            if (!id.isEmpty()) {
+                ids << id;
+                names << (name.isEmpty() ? id : name);
+            }
+        }
+    }
+    if (xml.hasError()) {
+        error = "the host's answer couldn't be read";
+        return false;
+    }
+    return true;
+}
+
+bool
+NvHTTP::setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error)
+{
+    appliedKbps = 0;
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/bitrate");
+    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex() +
+                 "&bitrate=" + QString::number(bitrateKbps));
+
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+#endif
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(4000, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) {
+        reply->abort();
+    }
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+    m_Nam->clearAccessCache();
+#endif
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    delete reply;
+
+    if (timedOut) {
+        error = "the host didn't answer";
+        return false;
+    }
+    if (status == 401 || status == 403) {
+        error = "the host refused it";
+        return false;
+    }
+    if (status == 404) {
+        error = "this host can't change the bitrate while streaming";
+        return false;
+    }
+    if (status != 200) {
+        error = "request failed (" + QString::number(status) + ")";
+        return false;
+    }
+
+    // The host answers with XML such as <root status_code="200"><bitrate>30000</bitrate></root>;
+    // a refused change still comes back as HTTP 200 with a different status_code
+    const QString text = QString::fromUtf8(body);
+    QRegularExpressionMatch code = QRegularExpression("status_code=\"(\\d+)\"").match(text);
+    if (code.hasMatch() && code.captured(1).toInt() != 200) {
+        error = code.captured(1).toInt() == 404 ? "no active stream for this device" : "the host refused the new bitrate";
+        return false;
+    }
+    QRegularExpressionMatch applied = QRegularExpression("<bitrate>(\\d+)</bitrate>").match(text);
+    appliedKbps = applied.hasMatch() ? applied.captured(1).toInt() : bitrateKbps;
     return true;
 }
 

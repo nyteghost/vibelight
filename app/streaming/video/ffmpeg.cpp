@@ -767,6 +767,10 @@ bool FFmpegVideoDecoder::getConnectionSnapshot(PCONNECTION_SNAPSHOT snapshot)
         rtt = 0;
     }
     snapshot->rttMs = rtt;
+    snapshot->rttVarianceMs = rttVariance;
+    snapshot->decodedFrames = m_GlobalVideoStats.decodedFrames;
+    snapshot->pacerDroppedFrames = m_GlobalVideoStats.pacerDroppedFrames;
+    snapshot->totalDecodeTimeUs = m_GlobalVideoStats.totalDecodeTimeUs;
     return true;
 }
 

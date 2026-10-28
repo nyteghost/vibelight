@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QString>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class SdlInputHandler;
@@ -161,6 +162,9 @@ private:
     SDL_Window* m_Window;
     TTF_Font* m_Font;
     TTF_Font* m_SmallFont;
+    // Bounded SDL-thread-only glyph cache. It stores rendered static labels
+    // instead of rerasterizing them on every mouse-move/menu redraw.
+    std::unordered_map<std::string, SDL_Surface*> m_TextCache;
     QByteArray m_FontData;
     bool m_TtfInitialized;
 

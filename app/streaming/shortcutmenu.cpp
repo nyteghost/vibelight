@@ -220,6 +220,11 @@ ShortcutMenu::~ShortcutMenu()
     destroyGraphWindow();
     overrideMinimizeOnFocusLoss(false);
 
+    for (auto& entry : m_TextCache) {
+        SDL_FreeSurface(entry.second);
+    }
+    m_TextCache.clear();
+
     if (m_Window != nullptr) {
         SDL_DestroyWindow(m_Window);
     }
@@ -1864,18 +1869,45 @@ bool ShortcutMenu::handleEvent(const SDL_Event& event)
 void ShortcutMenu::drawText(SDL_Surface* dst, TTF_Font* font, const char* text, SDL_Color color,
                             int x, int y, bool rightAlign)
 {
-    if (text == nullptr || text[0] == 0) {
+    if (text == nullptr || text[0] == 0 || font == nullptr || dst == nullptr) {
         return;
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
-    if (surface == nullptr) {
-        return;
+    // SDL_ttf glyph rendering can be expensive when the menu is redrawn on
+    // every hover transition. Cache text/color/font surfaces on the SDL thread.
+    // Limit entries so a long-running session with dynamic status text cannot
+    // grow memory without bound.
+    std::string key;
+    key.reserve(std::strlen(text) + 5);
+    key.push_back(font == m_Font ? 'M' : 'S');
+    key.push_back(static_cast<char>(color.r));
+    key.push_back(static_cast<char>(color.g));
+    key.push_back(static_cast<char>(color.b));
+    key.push_back(static_cast<char>(color.a));
+    key.append(text);
+
+    SDL_Surface* surface = nullptr;
+    auto found = m_TextCache.find(key);
+    if (found != m_TextCache.end()) {
+        surface = found->second;
+    }
+    else {
+        constexpr std::size_t maxCachedLabels = 192;
+        if (m_TextCache.size() >= maxCachedLabels) {
+            for (auto& entry : m_TextCache) {
+                SDL_FreeSurface(entry.second);
+            }
+            m_TextCache.clear();
+        }
+        surface = TTF_RenderUTF8_Blended(font, text, color);
+        if (surface == nullptr) {
+            return;
+        }
+        m_TextCache.emplace(std::move(key), surface);
     }
 
     SDL_Rect dstRect = { rightAlign ? x - surface->w : x, y, surface->w, surface->h };
     SDL_BlitSurface(surface, nullptr, dst, &dstRect);
-    SDL_FreeSurface(surface);
 }
 
 void ShortcutMenu::drawChevron(SDL_Surface* dst, int cx, int cy, bool up, Uint32 color)

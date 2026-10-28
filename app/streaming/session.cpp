@@ -48,6 +48,20 @@
 #include <QGuiApplication>
 #include <QCursor>
 #include <QScreen>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QLockFile>
+#include <QStandardPaths>
+
+#ifdef Q_OS_WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QQuickOpenGLUtils>
@@ -2019,9 +2033,71 @@ void Session::startAutoClipboardOp(bool pull, const QString& text)
     thread->start();
 }
 
-// Automatic clipboard sync, called from the stream loop on the SDL thread. Everything stays
-// on the clipboard of this PC and the host while streaming: a copy on either side is
-// sent to the other within about a second or two. The clipboard text is never logged.
+// The main and secondary stream run as separate processes. Keep only a lightweight
+// process ID per host so a second shortcut invocation does not create a duplicate.
+// On Windows, activate the existing stream window when possible.
+#ifdef Q_OS_WIN32
+namespace {
+bool secondaryProcessIsRunning(qint64 pid)
+{
+    if (pid <= 0 || pid > 0xFFFFFFFFLL) {
+        return false;
+    }
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                                 FALSE, static_cast<DWORD>(pid));
+    if (!process) {
+        return false;
+    }
+    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    wchar_t filename[32768] = {};
+    DWORD length = static_cast<DWORD>(sizeof(filename) / sizeof(filename[0]));
+    const bool identified = running && QueryFullProcessImageNameW(process, 0, filename, &length);
+    CloseHandle(process);
+    return identified &&
+           QFileInfo(QString::fromWCharArray(filename, static_cast<int>(length))).canonicalFilePath()
+               .compare(QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath(),
+                        Qt::CaseInsensitive) == 0;
+}
+
+struct SecondaryWindowLookup {
+    DWORD pid;
+    HWND window = nullptr;
+};
+
+BOOL CALLBACK findSecondaryWindow(HWND hwnd, LPARAM context)
+{
+    auto* lookup = reinterpret_cast<SecondaryWindowLookup*>(context);
+    DWORD windowPid = 0;
+    GetWindowThreadProcessId(hwnd, &windowPid);
+    if (windowPid != lookup->pid || !IsWindowVisible(hwnd)) {
+        return TRUE;
+    }
+    wchar_t title[256] = {};
+    GetWindowTextW(hwnd, title, static_cast<int>(sizeof(title) / sizeof(title[0])));
+    if (QString::fromWCharArray(title).contains("Vibelight", Qt::CaseInsensitive)) {
+        lookup->window = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void focusSecondaryWindow(qint64 pid)
+{
+    SecondaryWindowLookup lookup {static_cast<DWORD>(pid), nullptr};
+    EnumWindows(findSecondaryWindow, reinterpret_cast<LPARAM>(&lookup));
+    if (!lookup.window) {
+        return; // The child process may still be creating its stream window.
+    }
+    if (IsIconic(lookup.window)) {
+        ShowWindow(lookup.window, SW_RESTORE);
+    }
+    SetForegroundWindow(lookup.window);
+}
+} // namespace
+#endif
+
+// Launch a separate client for the Remote Monitor, but prevent multiple
+// instances for the same host when the shortcut is clicked repeatedly.
 bool Session::openSecondMonitorWindow(QString& error)
 {
     if (isSecondaryWindow()) {
@@ -2036,8 +2112,36 @@ bool Session::openSecondMonitorWindow(QString& error)
     // The host's built-in app that streams an extra display; renamed hosts can change it here
     const QString appName = QSettings().value("vibelight/secondMonitorApp", "Remote Monitor").toString();
 
+    const QString hostUuid = m_Computer->uuid;
+    QSettings settings;
+    const QString key = "vibelight/secondaryWindowPid/" + hostUuid;
+    const QString lockDirectory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (!QDir().mkpath(lockDirectory)) {
+        error = tr("Couldn't access the Vibelight runtime folder.");
+        return false;
+    }
+    const QString lockId = QString::fromLatin1(
+        QCryptographicHash::hash(hostUuid.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QLockFile launchLock(QDir(lockDirectory).filePath("secondary-" + lockId + ".lock"));
+    launchLock.setStaleLockTime(30000);
+    if (!launchLock.tryLock(0)) {
+        error = tr("Another Remote Monitor window launch is already in progress.");
+        return false;
+    }
+
+    settings.sync();
+#ifdef Q_OS_WIN32
+    const qint64 previousPid = settings.value(key).toLongLong();
+    if (secondaryProcessIsRunning(previousPid)) {
+        focusSecondaryWindow(previousPid);
+        return true;
+    }
+#endif
+    // A dead or reused PID is no longer evidence of an open Remote Monitor.
+    settings.remove(key);
+
     QStringList args;
-    args << "stream" << m_Computer->uuid << appName
+    args << "stream" << hostUuid << appName
          << "--display-mode" << "windowed"
          << "--no-quit-after";
 
@@ -2047,9 +2151,14 @@ bool Session::openSecondMonitorWindow(QString& error)
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("VIBELIGHT_SECONDARY", "1");
     process.setProcessEnvironment(env);
-    if (!process.startDetached()) {
+    qint64 launchedPid = 0;
+    if (!process.startDetached(&launchedPid)) {
         error = tr("Couldn't start the second window (%1)").arg(process.errorString());
         return false;
+    }
+    if (launchedPid > 0) {
+        settings.setValue(key, launchedPid);
+        settings.sync();
     }
     return true;
 }

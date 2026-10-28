@@ -3,6 +3,9 @@
 #include <QThreadPool>
 #include <QThread>
 #include <QSettings>
+#include <QPointer>
+#include <QCoreApplication>
+#include <memory>
 #include "backend/nvhttp.h"
 
 ComputerModel::ComputerModel(QObject* object)
@@ -249,10 +252,13 @@ void ComputerModel::handleComputerStateChanged(NvComputer* computer)
 
 void ComputerModel::chooseMonitorForComputer(int computerIndex)
 {
-    Q_ASSERT(computerIndex < m_Computers.count());
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return;
+    }
 
     NvComputer* computer = m_Computers[computerIndex];
-    const QString current = QSettings().value("vibelight/monitor/" + computer->uuid).toString();
+    const QString computerUuid = computer->uuid;
+    const QString current = QSettings().value("vibelight/monitor/" + computerUuid).toString();
     if (!computer->vibebeamFeatures.contains("monitors")) {
         emit monitorsReady(computerIndex, QStringList(), QStringList(), current,
                            tr("This PC doesn't offer a monitor choice. It needs Vibebeam beta.9 or newer."));
@@ -263,20 +269,47 @@ void ComputerModel::chooseMonitorForComputer(int computerIndex)
     const uint16_t httpsPort = computer->activeHttpsPort;
     const QSslCertificate serverCert = computer->serverCert;
     const bool useTrueUid = !computer->isNvidiaServerSoftware;
+    const quint64 requestGeneration = ++m_MonitorRequestGenerations[computerUuid];
 
-    QThread* thread = QThread::create([this, computerIndex, current, address, httpsPort, serverCert, useTrueUid]() {
+    // Hold a weak QObject guard indirectly so that the worker does not access
+    // the model, its rows, or its QObject lifetime from another thread.
+    // The QPointer itself is only inspected on the GUI thread.
+    const auto modelGuard = std::make_shared<QPointer<ComputerModel>>(this);
+    QThread* thread = QThread::create([modelGuard, computerUuid, requestGeneration, current,
+                                      address, httpsPort, serverCert, useTrueUid]() {
         NvHTTP http(address, httpsPort, serverCert, useTrueUid);
         QStringList ids, names;
         QString error;
         if (!http.getMonitors(ids, names, error)) {
-            error = tr("Couldn't get the monitor list: %1").arg(error);
+            error = ComputerModel::tr("Couldn't get the monitor list: %1").arg(error);
         }
         else if (ids.isEmpty()) {
-            error = tr("The host didn't report any monitors to choose from.");
+            error = ComputerModel::tr("The host didn't report any monitors to choose from.");
         }
-        QMetaObject::invokeMethod(this, [this, computerIndex, ids, names, current, error]() {
-            emit monitorsReady(computerIndex, ids, names, current, error);
-        }, Qt::QueuedConnection);
+
+        // Never post to a potentially deleted model; this application receiver
+        // owns the queued callback and drops it during application shutdown.
+        if (auto* app = QCoreApplication::instance()) {
+            QMetaObject::invokeMethod(app, [modelGuard, computerUuid, requestGeneration,
+                                            ids, names, current, error]() {
+                ComputerModel* model = modelGuard->data();
+                if (!model || model->m_MonitorRequestGenerations.value(computerUuid) != requestGeneration) {
+                    return;  // model destroyed or a newer request superseded this result
+                }
+
+                // The row can change while the HTTPS request runs. Find the
+                // original host by its stable UUID, not the captured row number.
+                for (int row = 0; row < model->m_Computers.size(); ++row) {
+                    NvComputer* candidate = model->m_Computers[row];
+                    if (candidate && candidate->uuid == computerUuid) {
+                        emit model->monitorsReady(row, ids, names, current, error);
+                        return;
+                    }
+                }
+                // The host was removed while the request was outstanding.
+                model->m_MonitorRequestGenerations.remove(computerUuid);
+            }, Qt::QueuedConnection);
+        }
     });
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
@@ -284,8 +317,9 @@ void ComputerModel::chooseMonitorForComputer(int computerIndex)
 
 void ComputerModel::setMonitorForComputer(int computerIndex, QString monitorId)
 {
-    Q_ASSERT(computerIndex < m_Computers.count());
-
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return;
+    }
     const QString key = "vibelight/monitor/" + m_Computers[computerIndex]->uuid;
     if (monitorId.isEmpty()) {
         QSettings().remove(key);

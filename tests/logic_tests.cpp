@@ -189,6 +189,33 @@ static void testAutoBitrate()
     CHECK(g.currentMbps() == 50);
 }
 
+static void testAutoBitrateAcknowledgment()
+{
+    using vibelight::AutoBitrateController;
+
+    // The host may apply a lower value than we requested. The next
+    // decision must be computed from the host's confirmed value.
+    AutoBitrateController clamped(50);
+    CHECK(clamped.update(6000, 5.0, false) == 30);
+    clamped.syncAppliedMbps(20);
+    CHECK(clamped.currentMbps() == 20);
+    CHECK(clamped.update(15000, 5.0, false) == 12.5);
+
+    // When the request fails, restore the previous confirmed bitrate so
+    // subsequent cuts don't compound a change that never happened.
+    AutoBitrateController rejected(50);
+    CHECK(rejected.update(6000, 5.0, false) == 30);
+    rejected.syncAppliedMbps(50);
+    CHECK(rejected.currentMbps() == 50);
+    CHECK(rejected.update(15000, 5.0, false) == 30);
+
+    // Bad or unexpectedly high reports must not corrupt the controller.
+    rejected.syncAppliedMbps(0);
+    CHECK(rejected.currentMbps() == 30);
+    rejected.syncAppliedMbps(100);
+    CHECK(rejected.currentMbps() == 50);
+}
+
 static void testBitrate()
 {
     using vibelight::suggestBitrateMbps;
@@ -266,6 +293,7 @@ int main()
     testKeys();
     testBitrate();
     testAutoBitrate();
+    testAutoBitrateAcknowledgment();
     testAnalyzeConnection();
     testHotkey();
 

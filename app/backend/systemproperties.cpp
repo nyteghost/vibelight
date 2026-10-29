@@ -485,6 +485,16 @@ void SystemProperties::setAutoBitrateNotificationPosition(int position)
     QSettings().setValue("vibelight/autoBitrateNotificationPosition", position == 1 ? 1 : 0);
 }
 
+bool SystemProperties::idleDisconnectEnabled()
+{
+    return QSettings().value("vibelight/idleDisconnectEnabled", true).toBool();
+}
+
+void SystemProperties::setIdleDisconnectEnabled(bool enabled)
+{
+    QSettings().setValue("vibelight/idleDisconnectEnabled", enabled);
+}
+
 QString SystemProperties::downloadFolder()
 {
     const QString downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);

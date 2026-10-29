@@ -4,10 +4,49 @@
 // on their own (see tests/logic_tests.cpp, run by CI).
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <string>
 
 namespace vibelight {
+
+class IdleSessionGuard
+{
+public:
+    // SDL_GetTicks() is uint32; subtraction stays correct across wraparound.
+    static constexpr std::uint32_t idleTimeoutMs = 5u * 60u * 60u * 1000u;
+    static constexpr std::uint32_t responseTimeoutMs = 2u * 60u * 1000u;
+
+    explicit IdleSessionGuard(std::uint32_t now) : m_LastInput(now) {}
+    void noteInput(std::uint32_t now) {
+        if (!m_PromptOpen) m_LastInput = now;
+    }
+    bool needsPrompt(std::uint32_t now) const {
+        return !m_PromptOpen && (now - m_LastInput) >= idleTimeoutMs;
+    }
+    void promptOpened(std::uint32_t now) {
+        m_PromptOpen = true;
+        m_PromptStart = now;
+    }
+    bool promptExpired(std::uint32_t now) const {
+        return m_PromptOpen && (now - m_PromptStart) >= responseTimeoutMs;
+    }
+    unsigned int responseSecondsLeft(std::uint32_t now) const {
+        if (!m_PromptOpen) return 0;
+        const std::uint32_t elapsed = now - m_PromptStart;
+        if (elapsed >= responseTimeoutMs) return 0;
+        return (responseTimeoutMs - elapsed + 999u) / 1000u;
+    }
+    void confirmed(std::uint32_t now) {
+        m_LastInput = now;
+        m_PromptOpen = false;
+    }
+private:
+    std::uint32_t m_LastInput;
+    std::uint32_t m_PromptStart = 0;
+    bool m_PromptOpen = false;
+};
+
 
 // Maps one ASCII character to the Windows virtual-key code that types it on a US keyboard.
 // Returns false for characters that have no key (accents, emoji, other control characters).

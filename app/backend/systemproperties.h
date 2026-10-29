@@ -70,6 +70,8 @@ public:
     Q_INVOKABLE QString downloadFolder();
     Q_INVOKABLE bool setDownloadFolder(const QString& folder);
     Q_INVOKABLE bool openDownloadFolder();
+    Q_INVOKABLE bool idleDisconnectEnabled();
+    Q_INVOKABLE void setIdleDisconnectEnabled(bool enabled);
     Q_INVOKABLE void setClipboardAutoSync(bool enabled);
     Q_INVOKABLE void setShortcutMenuHotkey(const QString& letter);
     Q_INVOKABLE bool shouldShowWhatsNew();

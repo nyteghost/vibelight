@@ -2,6 +2,7 @@
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "streaming/shortcutmenu.h"
+#include "streaming/idlepresenceprompt.h"
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
@@ -2917,8 +2918,60 @@ void Session::exec()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
+    // Activity is local keyboard/mouse/touch/controller input, not video or
+    // network traffic; every stream instance has its own watchdog.
+    const bool idleDisconnectEnabled =
+        QSettings().value("vibelight/idleDisconnectEnabled", true).toBool();
+    vibelight::IdleSessionGuard idleGuard(SDL_GetTicks());
+    IdlePresencePrompt idlePrompt;
+    Uint32 idlePromptRetryAt = 0;
+    bool idleRestoreCapture = false;
+
     SDL_Event event;
     for (;;) {
+        if (idleDisconnectEnabled) {
+            const Uint32 now = SDL_GetTicks();
+            if (idlePrompt.visible()) {
+                if (idleGuard.promptExpired(now)) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "Idle confirmation unanswered for 2 minutes; ending session");
+                    idlePrompt.close();
+                    cancelFileTransfers();
+                    // Host quitApp() is part of the existing graceful cleanup
+                    // and releases host-managed virtual displays. Do not quit
+                    // the host app from a detached secondary-monitor client.
+                    if (isSecondaryWindow()) {
+                        m_Preferences->quitAppAfter = false;
+                        setShouldExit(false);
+                    }
+                    else {
+                        setShouldExit(true);
+                    }
+                    goto DispatchDeferredCleanup;
+                }
+                idlePrompt.update(idleGuard.responseSecondsLeft(now));
+            }
+            else if (idleGuard.needsPrompt(now) &&
+                     (idlePromptRetryAt == 0 ||
+                      static_cast<Sint32>(now - idlePromptRetryAt) >= 0)) {
+                idleRestoreCapture = m_InputHandler->isCaptureActive();
+                m_InputHandler->raiseAllKeys();
+                m_InputHandler->setCaptureActive(false);
+                if (idlePrompt.show(m_Window)) {
+                    idleGuard.promptOpened(now);
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "Stream has had no local input for 5 hours; showing confirmation");
+                }
+                else {
+                    // Never silently disconnect if we cannot display the
+                    // confirmation. Retry the overlay in one minute.
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Unable to show idle confirmation; retrying in 60 seconds");
+                    if (idleRestoreCapture) m_InputHandler->setCaptureActive(true);
+                    idlePromptRetryAt = now + 60000u;
+                }
+            }
+        }
         tickClipboardSync();
         tickAutoBitrate();
 
@@ -2947,7 +3000,8 @@ void Session::exec()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, (m_ShortcutMenu != nullptr && m_ShortcutMenu->needsTick()) ? 50 : 1000)) {
+        if (!SDL_WaitEventTimeout(&event, (idlePrompt.visible() ||
+            (m_ShortcutMenu != nullptr && m_ShortcutMenu->needsTick())) ? 50 : 1000)) {
             presence.runCallbacks();
             continue;
         }
@@ -2968,8 +3022,88 @@ void Session::exec()
             continue;
         }
 #endif
-        // Events that belong to the floating shortcut menu's own window must never
-        // reach the stream window / input handlers below.
+        // The response must be explicit. Ordinary input while the confirmation
+        // is displayed does not dismiss it or reach the host.
+        if (idlePrompt.visible()) {
+            const auto answer = idlePrompt.handleEvent(event);
+            if (answer == IdlePresencePrompt::Answer::Continue) {
+                idlePrompt.close();
+                idleGuard.confirmed(SDL_GetTicks());
+                if (idleRestoreCapture) m_InputHandler->setCaptureActive(true);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Idle presence confirmed; continuing streaming");
+                continue;
+            }
+            if (answer == IdlePresencePrompt::Answer::Disconnect) {
+                idlePrompt.close();
+                cancelFileTransfers();
+                if (isSecondaryWindow()) {
+                    m_Preferences->quitAppAfter = false;
+                    setShouldExit(false);
+                }
+                else {
+                    setShouldExit(true);
+                }
+                goto DispatchDeferredCleanup;
+            }
+            // The confirmation window is a real SDL window and also gets
+            // exposure/focus events; none should reach the stream renderer.
+            if (event.type == SDL_WINDOWEVENT &&
+                event.window.windowID == idlePrompt.windowId()) {
+                idlePrompt.update(idleGuard.responseSecondsLeft(SDL_GetTicks()));
+                continue;
+            }
+            switch (event.type) {
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
+            case SDL_TEXTINPUT:
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEMOTION:
+            case SDL_MOUSEWHEEL:
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            case SDL_CONTROLLERAXISMOTION:
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+                continue;
+            default:
+                break;
+            }
+        }
+        else if (idleDisconnectEnabled) {
+            // Do not count video frames, automatic clipboard or bitrate
+            // updates, joystick jitter, or system window/monitor events.
+            bool humanInput = false;
+            switch (event.type) {
+            case SDL_KEYDOWN:
+                humanInput = event.key.repeat == 0;
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEWHEEL:
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+                humanInput = true;
+                break;
+            case SDL_MOUSEMOTION:
+                humanInput = (event.motion.xrel != 0 || event.motion.yrel != 0);
+                break;
+            case SDL_CONTROLLERAXISMOTION:
+                humanInput = event.caxis.value > 8000 || event.caxis.value < -8000;
+                break;
+            default:
+                break;
+            }
+            if (humanInput) idleGuard.noteInput(SDL_GetTicks());
+        }
+
+        // Events belonging to the floating shortcuts window must never
+        // reach the stream input handlers below.
         if (m_ShortcutMenu != nullptr && m_ShortcutMenu->handleEvent(event)) {
             continue;
         }
@@ -3338,6 +3472,9 @@ void Session::exec()
     }
 
 DispatchDeferredCleanup:
+    // Explicitly destroy the idle overlay before the stream SDL window.
+    idlePrompt.close();
+
     // Switch back to synchronous logging mode
     StreamUtils::exitAsyncLoggingMode();
 

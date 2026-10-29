@@ -29,6 +29,36 @@ static void expectKey(char c, unsigned short vk, bool shift)
     }
 }
 
+static void testIdleSessionGuard()
+{
+    using vibelight::IdleSessionGuard;
+    const std::uint32_t start = 1000;
+    IdleSessionGuard guard(start);
+    CHECK(!guard.needsPrompt(start));
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs - 1));
+    guard.noteInput(start + 10000);
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t deadline = start + 10000 + IdleSessionGuard::idleTimeoutMs;
+    CHECK(guard.needsPrompt(deadline));
+    guard.promptOpened(deadline);
+    CHECK(!guard.needsPrompt(deadline));
+    CHECK(guard.responseSecondsLeft(deadline) == 120u);
+    guard.noteInput(deadline + 5000);
+    CHECK(!guard.promptExpired(deadline + 119999));
+    CHECK(guard.responseSecondsLeft(deadline + 119999) == 1u);
+    CHECK(guard.promptExpired(deadline + 120000));
+    guard.confirmed(deadline + 120000);
+    CHECK(!guard.needsPrompt(deadline + 120000));
+    CHECK(guard.needsPrompt(deadline + 120000 + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t nearWrap = 0xfffffff0u;
+    IdleSessionGuard wrap(nearWrap);
+    CHECK(!wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs - 1u));
+    CHECK(wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs));
+    wrap.promptOpened(nearWrap + IdleSessionGuard::idleTimeoutMs);
+    CHECK(wrap.promptExpired(nearWrap + IdleSessionGuard::idleTimeoutMs +
+                             IdleSessionGuard::responseTimeoutMs));
+}
+
 static void testKeys()
 {
     // Letters and digits
@@ -291,6 +321,7 @@ static void testHotkey()
 int main()
 {
     testKeys();
+    testIdleSessionGuard();
     testBitrate();
     testAutoBitrate();
     testAutoBitrateAcknowledgment();

@@ -749,7 +749,8 @@ NvHTTP::setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error)
 }
 
 bool
-NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
+NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error,
+                   std::atomic<bool>* cancelled, std::atomic<int>* progress)
 {
     static const qint64 kMaxUploadBytes = 512LL * 1024 * 1024; // matches the host's limit
 
@@ -825,6 +826,20 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
     // QFile and QNetworkAccessManager live on the same worker thread. The file
     // remains open until the reply has finished or has been aborted/deleted.
     QNetworkReply* reply = m_Nam->post(request, &file);
+    if (progress) {
+        progress->store(0);
+        connect(reply, &QNetworkReply::uploadProgress, reply, [progress](qint64 sent, qint64 total) {
+            if (total > 0) progress->store(static_cast<int>(qBound<qint64>(0, sent * 100 / total, 99)));
+        });
+    }
+    QTimer cancelPoll;
+    if (cancelled) {
+        cancelPoll.setInterval(125);
+        connect(&cancelPoll, &QTimer::timeout, reply, [reply, cancelled]() {
+            if (cancelled->load() && !reply->isFinished()) reply->abort();
+        });
+        cancelPoll.start();
+    }
 
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -855,8 +870,11 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
             << "networkError=" << (int)networkError << networkErrorText
             << "responseBytes=" << response.size() << "sslProblems=" << sslProblems;
 
-    if (timedOut) {
-        error = "the host didn't finish receiving it";
+    if (cancelled && cancelled->load()) {
+        error = "transfer canceled";
+    }
+    else if (timedOut) {
+        error = "the host didn\'t finish receiving it";
     }
     else if (status == 401) {
         error = "the host refused it. Allow \"Upload files\" for this client in the host's web UI";
@@ -887,6 +905,70 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
 
 
 bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
+{
+    return downloadHostFile(QString(), savedPath, error);
+}
+
+bool NvHTTP::getHostFileList(QStringList& names, QString& error)
+{
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/actions/files");
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    auto ssl = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer timer;
+    timer.setSingleShot(true);
+    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(15000);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool timeout = !reply->isFinished();
+    if (timeout) reply->abort();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const bool success = !timeout && status == 200 && reply->error() == QNetworkReply::NoError;
+    const QByteArray data = reply->read(128 * 1024 + 1);
+    delete reply;
+    disconnect(ssl);
+    if (!success) {
+        error = status == 401 ? "enable Download files for this client in Vibebeam" :
+                status == 403 ? "a stream must be active to download host files" :
+                status == 404 ? "the host needs the matching download beta" :
+                timeout ? "file list request timed out" :
+                "host file list failed (HTTP " + QString::number(status) + ")";
+        return false;
+    }
+    if (data.size() > 128 * 1024) {
+        error = "host file list was too large";
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        error = "invalid host file list";
+        return false;
+    }
+    names.clear();
+    const auto entries = document.object().value("files").toArray();
+    for (const auto& entry : entries) {
+        const QString name = entry.toObject().value("name").toString();
+        if (!name.isEmpty() && name != "." && name != ".." &&
+            name == QFileInfo(name).fileName() &&
+            !name.contains('/') && !name.contains('\\') && !names.contains(name)) {
+            names.append(name);
+        }
+    }
+    return true;
+}
+
+bool NvHTTP::downloadHostFile(const QString& requestedName, QString& savedPath, QString& error,
+                              std::atomic<bool>* cancelled, std::atomic<int>* progress)
 {
     constexpr qint64 maxDownload = 512LL * 1024 * 1024;
     if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
@@ -939,9 +1021,26 @@ bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
         error = "the host's shared transfer folder has no downloadable files";
         return false;
     }
-    const QJsonObject newest = files.first().toObject();
-    const QString name = newest.value("name").toString();
-    const qint64 expectedSize = static_cast<qint64>(newest.value("size").toDouble(-1));
+    QJsonObject selected;
+    if (requestedName.isEmpty()) {
+        selected = files.first().toObject();
+    }
+    else {
+        for (const auto& candidate : files) {
+            const QJsonObject entry = candidate.toObject();
+            if (entry.value("name").toString() == requestedName) {
+                selected = entry;
+                break;
+            }
+        }
+        if (selected.isEmpty()) {
+            disconnect(sslHandler);
+            error = "the selected host file is no longer available";
+            return false;
+        }
+    }
+    const QString name = selected.value("name").toString();
+    const qint64 expectedSize = static_cast<qint64>(selected.value("size").toDouble(-1));
     if (name.isEmpty() || name == "." || name == ".." ||
         name != QFileInfo(name).fileName() || name.contains('\\') || name.contains('/') ||
         expectedSize < 0 || expectedSize > maxDownload) {
@@ -979,11 +1078,22 @@ bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
     QNetworkReply* reply = m_Nam->get(request);
     qint64 received = 0;
     bool writeFailed = false;
+    if (progress) progress->store(0);
+    QTimer cancelPoll;
+    if (cancelled) {
+        cancelPoll.setInterval(125);
+        connect(&cancelPoll, &QTimer::timeout, reply, [reply, cancelled]() {
+            if (cancelled->load() && !reply->isFinished()) reply->abort();
+        });
+        cancelPoll.start();
+    }
     auto drain = [&]() {
         while (reply->bytesAvailable() > 0) {
             const QByteArray chunk = reply->read(qMin<qint64>(reply->bytesAvailable(), 128 * 1024));
             if (chunk.isEmpty()) break;
             received += chunk.size();
+            if (progress && expectedSize > 0)
+                progress->store(static_cast<int>(qBound<qint64>(0, received * 100 / expectedSize, 99)));
             if (received > maxDownload || received > expectedSize ||
                 temporary.write(chunk) != chunk.size()) {
                 writeFailed = true;
@@ -1010,8 +1120,9 @@ bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
                           reply->header(QNetworkRequest::ContentLengthHeader).toLongLong() == expectedSize;
     delete reply;
     disconnect(sslHandler);
-    if (!complete || !temporary.flush()) {
-        error = status == 401 ? "Download files permission is required" :
+    if (!complete || !temporary.flush() || (cancelled && cancelled->load())) {
+        error = (cancelled && cancelled->load()) ? "transfer canceled" :
+                status == 401 ? "Download files permission is required" :
                 status == 403 ? "the stream must remain active during download" :
                 timedOut ? "host download timed out" :
                 "download failed or was incomplete";
@@ -1034,6 +1145,7 @@ bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
         if (QFileInfo::exists(dest)) continue;
         if (temporary.rename(dest)) {
             savedPath = dest;
+            if (progress) progress->store(100);
             return true;
         }
         if (QFileInfo::exists(dest)) continue; // concurrent download won the name

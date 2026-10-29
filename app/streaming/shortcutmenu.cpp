@@ -458,6 +458,12 @@ void ShortcutMenu::buildItems()
     special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
     special(PageTools, "Preview bitrate notification", "test notification position", KindPreviewBitrate);
     special(PageTools, "Download newest host file", "Downloads/Vibelight", KindDownloadHostFile);
+    special(PageTools, "Browse host files", "choose a shared file", KindBrowseHostFiles);
+    const QString transferStatus = Session::get() ? Session::get()->transferProgressText() : QString();
+    if (!transferStatus.isEmpty()) {
+        special(PageTools, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
     if (!Session::isSecondaryWindow()) {
         special(PageTools, "Open second monitor window", "Remote Monitor", KindSecondWindow);
     }
@@ -474,6 +480,48 @@ void ShortcutMenu::buildItems()
     m_Items.back().target = 0;
     special(PageTyping, "Key presses", "terminals, Linux hosts", KindSetTyping);
     m_Items.back().target = 1;
+
+    // The share browser is intentionally bounded: eight items per page
+    // prevents the floating menu from extending beyond small stream windows.
+    m_PageTitles[PageHostFiles].push_back("Host shared files (Downloads/Vibelight)");
+    special(PageHostFiles, "Refresh host file list", "recheck the host", KindRefreshHostFiles);
+    if (m_HostFilesLoading || !m_HostFileError.isEmpty() || m_HostFiles.isEmpty()) {
+        Item info;
+        info.kind = KindInfo;
+        info.label = m_HostFilesLoading ? "Loading host files..." :
+                     !m_HostFileError.isEmpty() ? m_HostFileError.left(70).toStdString() :
+                     "No host files found";
+        info.page = PageHostFiles;
+        info.column = 0;
+        info.clientCombo = -1;
+        info.dangerous = false;
+        m_Items.push_back(info);
+    }
+    else {
+        const int pageSize = 8;
+        const int start = m_HostFilesPage * pageSize;
+        for (int n = start; n < qMin(m_HostFiles.size(), start + pageSize); ++n) {
+            Item file;
+            const QString name = m_HostFiles.at(n);
+            file.kind = KindHostFileItem;
+            file.label = name.size() > 49 ? (name.left(46) + "...").toStdString() : name.toStdString();
+            file.hint = "download";
+            file.text = name.toStdString();
+            file.page = PageHostFiles;
+            file.column = 0;
+            file.clientCombo = -1;
+            file.dangerous = false;
+            m_Items.push_back(file);
+        }
+        if (m_HostFilesPage > 0)
+            special(PageHostFiles, "Previous files", "previous 8", KindHostFilesPrevious);
+        if ((m_HostFilesPage + 1) * pageSize < m_HostFiles.size())
+            special(PageHostFiles, "More files", "next 8", KindHostFilesNext);
+    }
+    if (!transferStatus.isEmpty()) {
+        special(PageHostFiles, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
 
     // Displays & windows: display and multi-monitor shortcuts sent to the remote PC
     // (0x50 = P, 0x25 = Left arrow, 0x27 = Right arrow, 0x42 = B)
@@ -852,7 +900,8 @@ void ShortcutMenu::addCategoryRows(bool hasTopColumn)
 
 int ShortcutMenu::parentPage(int page)
 {
-    return page == PageTyping ? PageVibelight : PageRoot;
+    return page == PageTyping ? PageVibelight :
+           page == PageHostFiles ? PageTools : PageRoot;
 }
 
 bool ShortcutMenu::currentTypeAsKeys() const
@@ -982,6 +1031,34 @@ void ShortcutMenu::endTransient()
 void ShortcutMenu::tick()
 {
     pollClipboard();
+
+    if (Session* session = Session::get()) {
+        QStringList hostFiles;
+        QString hostError;
+        if (session->takeHostFileList(hostFiles, hostError)) {
+            m_HostFiles = hostFiles;
+            m_HostFileError = hostError;
+            m_HostFilesLoading = false;
+            m_HostFilesPage = 0;
+            if (m_Expanded && m_Page == PageHostFiles) {
+                rebuildItems();
+                goToPage(PageHostFiles);
+            }
+        }
+        // Redraw at most once per second while displaying live transfer progress.
+        const unsigned int now = SDL_GetTicks();
+        if (m_Expanded && (m_Page == PageTools || m_Page == PageHostFiles) &&
+            static_cast<int>(now - m_NextTransferRefresh) >= 0) {
+            m_NextTransferRefresh = now + 1000;
+            const QString status = session->transferProgressText();
+            if (status.toStdString() != m_LastTransferProgress) {
+                m_LastTransferProgress = status.toStdString();
+                const int page = m_Page;
+                rebuildItems();
+                goToPage(page);
+            }
+        }
+    }
 
 #ifdef Q_OS_WIN32
     if (m_ScreenshotSaveState) {
@@ -1546,9 +1623,38 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindBrowseHostFiles || item.kind == KindRefreshHostFiles) {
+        if (Session* session = Session::get()) {
+            m_HostFiles.clear();
+            m_HostFileError.clear();
+            m_HostFilesLoading = true;
+            m_HostFilesPage = 0;
+            session->requestHostFileList();
+            m_Page = PageHostFiles;
+            rebuildItems();
+            goToPage(PageHostFiles);
+        }
+        return;
+    }
+    if (item.kind == KindHostFilesNext || item.kind == KindHostFilesPrevious) {
+        m_HostFilesPage += item.kind == KindHostFilesNext ? 1 : -1;
+        m_HostFilesPage = qBound(0, m_HostFilesPage, qMax(0, (m_HostFiles.size() - 1) / 8));
+        rebuildItems();
+        goToPage(PageHostFiles);
+        return;
+    }
+
     // Hide the button and give focus (and mouse capture, if we took it) back before
     // acting so that the action sees the same state the user had.
     dismiss(true);
+    if (item.kind == KindHostFileItem) {
+        if (Session::get()) Session::get()->startDownloadHostFile(QString::fromStdString(item.text));
+        return;
+    }
+    if (item.kind == KindCancelTransfer) {
+        if (Session::get()) Session::get()->cancelFileTransfers();
+        return;
+    }
 
     if (item.kind == KindConnectionCheck) {
         startConnectionCheck();

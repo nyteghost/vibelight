@@ -9,6 +9,7 @@
 #include <QUrl>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <atomic>
 
 class NvComputer;
 
@@ -197,11 +198,15 @@ public:
     // the "Upload files" permission). Blocks until the transfer ends, so call it from a worker
     // thread. Fills in the name the host saved it under, or a short explanation on failure.
     bool
-    uploadFile(const QString& localPath, QString& savedName, QString& error);
+    uploadFile(const QString& localPath, QString& savedName, QString& error,
+               std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr);
 
     // Download the newest file from the host's explicitly shared receive
     // folder (requires the host's Download files permission). Call on a worker.
     bool downloadNewestHostFile(QString& savedPath, QString& error);
+    bool getHostFileList(QStringList& names, QString& error);
+    bool downloadHostFile(const QString& name, QString& savedPath, QString& error,
+                          std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr);
 
     QVector<NvApp>
     getAppList();

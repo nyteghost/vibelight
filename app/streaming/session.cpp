@@ -1862,6 +1862,7 @@ void Session::queueFileUpload(const QString& path)
             return; // the worker will pick it up
         }
         state->running = true;
+        state->uploadCancel.store(false);
     }
 
     // Copy what the host connection needs so the worker never touches the Session
@@ -1877,9 +1878,13 @@ void Session::queueFileUpload(const QString& path)
                 QMutexLocker locker(&state->lock);
                 if (state->queue.isEmpty()) {
                     state->running = false;
+                    state->activeUploadName.clear();
+                    state->uploadPercent.store(-1);
                     return;
                 }
                 path = state->queue.takeFirst();
+                state->activeUploadName = QFileInfo(path).fileName();
+                state->uploadPercent.store(0);
             }
 
             auto post = [&state](const QString& text, unsigned int ms) {
@@ -1894,7 +1899,8 @@ void Session::queueFileUpload(const QString& path)
 
             QString savedName, error;
             NvHTTP http(address, httpsPort, serverCert, useTrueUid);
-            if (http.uploadFile(path, savedName, error)) {
+            if (http.uploadFile(path, savedName, error,
+                                &state->uploadCancel, &state->uploadPercent)) {
                 post("Sent " + savedName + " to the host", 4000);
             }
             else {
@@ -1908,6 +1914,11 @@ void Session::queueFileUpload(const QString& path)
 
 void Session::startDownloadNewestHostFile()
 {
+    startDownloadHostFile(QString());
+}
+
+void Session::startDownloadHostFile(const QString& name)
+{
     auto state = m_Upload;
     {
         QMutexLocker locker(&state->lock);
@@ -1917,8 +1928,11 @@ void Session::startDownloadNewestHostFile()
             state->messageReady = true;
             return;
         }
+        state->downloadCancel.store(false);
+        state->downloadPercent.store(0);
         state->downloadBusy = true;
-        state->message = "Downloading the newest host file...";
+        state->activeDownloadName = name.isEmpty() ? "newest host file" : name;
+        state->message = ("Downloading " + state->activeDownloadName + "...").toStdString();
         state->messageMs = 60000;
         state->messageReady = true;
     }
@@ -1927,12 +1941,15 @@ void Session::startDownloadNewestHostFile()
     const uint16_t port = m_Computer->activeHttpsPort;
     const QSslCertificate certificate = m_Computer->serverCert;
     const bool trueUid = !m_Computer->isNvidiaServerSoftware;
-    QThread* thread = QThread::create([state, address, port, certificate, trueUid]() {
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid, name]() {
         NvHTTP http(address, port, certificate, trueUid);
         QString destination, error;
-        const bool ok = http.downloadNewestHostFile(destination, error);
+        const bool ok = http.downloadHostFile(name, destination, error,
+                                               &state->downloadCancel, &state->downloadPercent);
         QMutexLocker locker(&state->lock);
         state->downloadBusy = false;
+        state->activeDownloadName.clear();
+        state->downloadPercent.store(-1);
         state->message = ok ? ("Downloaded to " + destination).toStdString()
                             : ("Host download: " + error).toStdString();
         state->messageMs = ok ? 7000 : 8000;
@@ -1940,6 +1957,75 @@ void Session::startDownloadNewestHostFile()
     });
     QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
+}
+
+void Session::requestHostFileList()
+{
+    auto state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->fileListBusy) return;
+        state->fileListBusy = true;
+        state->fileListReady = false;
+        state->availableFiles.clear();
+        state->fileListError.clear();
+    }
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid]() {
+        NvHTTP http(address, port, certificate, trueUid);
+        QStringList files;
+        QString error;
+        http.getHostFileList(files, error);
+        QMutexLocker locker(&state->lock);
+        state->availableFiles = files;
+        state->fileListError = error;
+        state->fileListReady = true;
+        state->fileListBusy = false;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+bool Session::takeHostFileList(QStringList& files, QString& error)
+{
+    QMutexLocker locker(&m_Upload->lock);
+    if (!m_Upload->fileListReady) return false;
+    files = m_Upload->availableFiles;
+    error = m_Upload->fileListError;
+    m_Upload->fileListReady = false;
+    return true;
+}
+
+void Session::cancelFileTransfers()
+{
+    auto state = m_Upload;
+    state->uploadCancel.store(true);
+    state->downloadCancel.store(true);
+    QMutexLocker locker(&state->lock);
+    state->queue.clear();
+    state->message = "Canceling active file transfers...";
+    state->messageMs = 4000;
+    state->messageReady = true;
+}
+
+QString Session::transferProgressText()
+{
+    QMutexLocker locker(&m_Upload->lock);
+    QStringList parts;
+    if (m_Upload->running) {
+        const int pct = m_Upload->uploadPercent.load();
+        parts << ("Upload " + m_Upload->activeUploadName +
+                  (pct < 0 ? QString() : " " + QString::number(pct) + "%"));
+    }
+    if (m_Upload->downloadBusy) {
+        const int pct = m_Upload->downloadPercent.load();
+        parts << ("Download " + m_Upload->activeDownloadName +
+                  (pct < 0 ? QString() : " " + QString::number(pct) + "%"));
+    }
+    return parts.join(" | ");
 }
 
 void Session::startHostClipboardPush(const QString& text)

@@ -174,6 +174,11 @@ public:
     void queueFileUpload(const QString& path);
     // Download the newest host-shared file to Downloads/Vibelight on a worker.
     void startDownloadNewestHostFile();
+    void startDownloadHostFile(const QString& name);
+    void requestHostFileList();
+    bool takeHostFileList(QStringList& files, QString& error);
+    void cancelFileTransfers();
+    QString transferProgressText();
     bool takeUploadMessage(std::string& message, unsigned int& durationMs);
 
     // Clipboard sync without blocking the stream loop: the request runs on a worker thread and
@@ -350,6 +355,16 @@ private:
         QStringList queue;
         bool running = false;
         bool downloadBusy = false;
+        bool fileListBusy = false;
+        bool fileListReady = false;
+        QStringList availableFiles;
+        QString fileListError;
+        std::atomic<bool> uploadCancel {false};
+        std::atomic<bool> downloadCancel {false};
+        std::atomic<int> uploadPercent {-1};
+        std::atomic<int> downloadPercent {-1};
+        QString activeUploadName;
+        QString activeDownloadName;
         bool messageReady = false;
         std::string message;
         unsigned int messageMs = 0;

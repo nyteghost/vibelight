@@ -14,7 +14,7 @@ class IdleSessionGuard
 {
 public:
     // SDL_GetTicks() is uint32; subtraction stays correct across wraparound.
-    static constexpr std::uint32_t idleTimeoutMs = 5u * 60u * 60u * 1000u;
+    static constexpr std::uint32_t idleTimeoutMs = 30u * 60u * 1000u;
     static constexpr std::uint32_t responseTimeoutMs = 2u * 60u * 1000u;
 
     explicit IdleSessionGuard(std::uint32_t now) : m_LastInput(now) {}

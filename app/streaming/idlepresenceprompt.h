@@ -165,7 +165,7 @@ private:
         const SDL_Color title = { 255, 238, 224, 255 };
         const SDL_Color hint = { 218, 205, 203, 255 };
         print(dst, m_Font, "Is anyone there?", kWidth / 2, 22, title);
-        print(dst, m_SmallFont, "No input for 5 hours. Are you still using this stream?",
+        print(dst, m_SmallFont, "No input for 30 minutes. Are you still using this stream?",
               kWidth / 2, 69, hint);
         char countdown[112] = {};
         std::snprintf(countdown, sizeof(countdown),

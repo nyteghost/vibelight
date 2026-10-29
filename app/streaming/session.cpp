@@ -2961,7 +2961,7 @@ void Session::exec()
                     m_TestIdlePrompt = false;
                     idleGuard.promptOpened(now);
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                "Stream has had no local input for 5 hours; showing confirmation");
+                                "Stream has had no local input for 30 minutes; showing confirmation");
                 }
                 else {
                     // Never silently disconnect if we cannot display the

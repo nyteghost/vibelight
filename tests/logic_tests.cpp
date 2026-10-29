@@ -32,6 +32,8 @@ static void expectKey(char c, unsigned short vk, bool shift)
 static void testIdleSessionGuard()
 {
     using vibelight::IdleSessionGuard;
+    CHECK(IdleSessionGuard::idleTimeoutMs == 30u * 60u * 1000u);
+    CHECK(IdleSessionGuard::responseTimeoutMs == 2u * 60u * 1000u);
     const std::uint32_t start = 1000;
     IdleSessionGuard guard(start);
     CHECK(!guard.needsPrompt(start));

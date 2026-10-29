@@ -1675,14 +1675,14 @@ Flickable {
                 CheckBox {
                     id: idleDisconnectCheck
                     width: parent.width
-                    text: qsTr("Ask if I'm still here after 5 hours without input")
+                    text: qsTr("Ask if I'm still here after 30 minutes without input")
                     font.pointSize: 12
                     checked: SystemProperties.idleDisconnectEnabled()
                     onClicked: SystemProperties.setIdleDisconnectEnabled(checked)
                     ToolTip.delay: 1000
                     ToolTip.timeout: 9000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("After 5 hours without keyboard, mouse, touch or controller input, Vibelight asks 'Is anyone there?' and gives you 2 minutes to confirm. If no one responds, it gracefully ends the stream, asks Vibebeam to stop the host app and clean up its virtual displays, and closes Vibelight. On by default. Takes effect next stream.")
+                    ToolTip.text: qsTr("After 30 minutes without keyboard, mouse, touch or controller input, Vibelight asks 'Is anyone there?' and gives you 2 minutes to confirm. If no one responds, it gracefully ends the stream, asks Vibebeam to stop the host app and clean up its virtual displays, and closes Vibelight. On by default. Takes effect next stream.")
                 }
 
                 CheckBox {

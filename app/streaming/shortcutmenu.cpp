@@ -457,7 +457,7 @@ void ShortcutMenu::buildItems()
     // Tools & session
     special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
     special(PageTools, "Preview bitrate notification", "test notification position", KindPreviewBitrate);
-    special(PageTools, "Test 5-hour idle prompt", "disconnects if unanswered", KindPreviewIdlePrompt);
+    special(PageTools, "Test 30-minute idle prompt", "disconnects if unanswered", KindPreviewIdlePrompt);
     special(PageTools, "Download newest host file", "Downloads/Vibelight", KindDownloadHostFile);
     special(PageTools, "Browse host files", "choose a shared file", KindBrowseHostFiles);
     const QString transferStatus = Session::get() ? Session::get()->transferProgressText() : QString();

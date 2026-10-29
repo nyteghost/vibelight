@@ -158,6 +158,8 @@ public:
     void setShouldExit(bool quitHostApp = false);
 
     void toggleShortcutMenu();
+    // Trigger the nonblocking confirmation without waiting five hours.
+    void requestIdlePromptTest() { m_TestIdlePrompt = true; }
 
     // Used by the shortcut menu's connection check
     bool getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot);
@@ -404,6 +406,7 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    bool m_TestIdlePrompt = false;
 
     bool m_AsyncConnectionSuccess;
 

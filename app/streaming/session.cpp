@@ -2951,13 +2951,14 @@ void Session::exec()
                 }
                 idlePrompt.update(idleGuard.responseSecondsLeft(now));
             }
-            else if (idleGuard.needsPrompt(now) &&
+            else if ((idleGuard.needsPrompt(now) || m_TestIdlePrompt) &&
                      (idlePromptRetryAt == 0 ||
                       static_cast<Sint32>(now - idlePromptRetryAt) >= 0)) {
                 idleRestoreCapture = m_InputHandler->isCaptureActive();
                 m_InputHandler->raiseAllKeys();
                 m_InputHandler->setCaptureActive(false);
                 if (idlePrompt.show(m_Window)) {
+                    m_TestIdlePrompt = false;
                     idleGuard.promptOpened(now);
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "Stream has had no local input for 5 hours; showing confirmation");

@@ -77,6 +77,7 @@ private:
         KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
         KindPreviewBitrate, // display the user-chosen bitrate notification location
+        KindPreviewIdlePrompt, // test the idle response window
         KindDownloadHostFile, // download newest file from host's shared folder
         KindBrowseHostFiles,
         KindRefreshHostFiles,

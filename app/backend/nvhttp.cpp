@@ -829,7 +829,7 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error,
     if (progress) {
         progress->store(0);
         connect(reply, &QNetworkReply::uploadProgress, reply, [progress](qint64 sent, qint64 total) {
-            if (total > 0) progress->store(static_cast<int>(qBound<qint64>(0, sent * 100 / total, 99)));
+            if (total > 0) progress->store(static_cast<int>(qBound<qint64>(qint64(0), sent * 100 / total, qint64(99))));
         });
     }
     QTimer cancelPoll;
@@ -1093,7 +1093,7 @@ bool NvHTTP::downloadHostFile(const QString& requestedName, QString& savedPath, 
             if (chunk.isEmpty()) break;
             received += chunk.size();
             if (progress && expectedSize > 0)
-                progress->store(static_cast<int>(qBound<qint64>(0, received * 100 / expectedSize, 99)));
+                progress->store(static_cast<int>(qBound<qint64>(qint64(0), received * 100 / expectedSize, qint64(99))));
             if (received > maxDownload || received > expectedSize ||
                 temporary.write(chunk) != chunk.size()) {
                 writeFailed = true;

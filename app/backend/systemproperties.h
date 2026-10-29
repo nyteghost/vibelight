@@ -67,6 +67,9 @@ public:
     Q_INVOKABLE void setAutoBitrate(bool enabled);
     Q_INVOKABLE int autoBitrateNotificationPosition();
     Q_INVOKABLE void setAutoBitrateNotificationPosition(int position);
+    Q_INVOKABLE QString downloadFolder();
+    Q_INVOKABLE bool setDownloadFolder(const QString& folder);
+    Q_INVOKABLE bool openDownloadFolder();
     Q_INVOKABLE void setClipboardAutoSync(bool enabled);
     Q_INVOKABLE void setShortcutMenuHotkey(const QString& letter);
     Q_INVOKABLE bool shouldShowWhatsNew();

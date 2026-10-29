@@ -485,6 +485,32 @@ void SystemProperties::setAutoBitrateNotificationPosition(int position)
     QSettings().setValue("vibelight/autoBitrateNotificationPosition", position == 1 ? 1 : 0);
 }
 
+QString SystemProperties::downloadFolder()
+{
+    const QString downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    const QString fallback = QDir(downloads.isEmpty() ? QDir::homePath() + "/Downloads" : downloads)
+                                 .filePath("Vibelight");
+    const QString configured = QSettings().value("vibelight/downloadFolder").toString();
+    return configured.isEmpty() ? fallback : configured;
+}
+
+bool SystemProperties::setDownloadFolder(const QString& folder)
+{
+    const QString clean = QDir::cleanPath(folder.trimmed());
+    if (clean.isEmpty() || !QDir::isAbsolutePath(clean) ||
+        !QDir().mkpath(clean) || !QFileInfo(clean).isWritable()) {
+        return false;
+    }
+    QSettings().setValue("vibelight/downloadFolder", clean);
+    return true;
+}
+
+bool SystemProperties::openDownloadFolder()
+{
+    const QString folder = downloadFolder();
+    return QDir().mkpath(folder) && QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+
 QString SystemProperties::problemReportUrl()
 {
     QString body;

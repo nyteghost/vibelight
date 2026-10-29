@@ -22,6 +22,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QTemporaryFile>
+#include <QSettings>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -1053,8 +1054,9 @@ bool NvHTTP::downloadHostFile(const QString& requestedName, QString& savedPath, 
     if (directory.isEmpty()) {
         directory = QDir::homePath() + "/Downloads";
     }
-    directory = QDir(directory).filePath("Vibelight");
-    if (!QDir().mkpath(directory)) {
+    directory = QSettings().value("vibelight/downloadFolder",
+                                      QDir(directory).filePath("Vibelight")).toString();
+    if (!QDir::isAbsolutePath(directory) || !QDir().mkpath(directory)) {
         disconnect(sslHandler);
         error = "couldn't create Downloads/Vibelight";
         return false;

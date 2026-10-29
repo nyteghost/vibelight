@@ -1630,6 +1630,48 @@ Flickable {
                     }
                 }
 
+                Label {
+                    width: parent.width
+                    text: qsTr("Received files folder (host to this PC):")
+                    font.pointSize: 12
+                }
+                Row {
+                    spacing: 8
+                    width: parent.width
+                    TextField {
+                        id: downloadFolderInput
+                        width: Math.max(180, parent.width - saveDownloadFolder.width - openDownloadFolder.width - 24)
+                        text: SystemProperties.downloadFolder()
+                        placeholderText: qsTr("Full path to download folder")
+                        selectByMouse: true
+                        onAccepted: saveDownloadFolder.clicked()
+                    }
+                    Button {
+                        id: saveDownloadFolder
+                        text: qsTr("Save")
+                        onClicked: {
+                            if (SystemProperties.setDownloadFolder(downloadFolderInput.text)) {
+                                downloadFolderInput.text = SystemProperties.downloadFolder()
+                                downloadFolderError.text = ""
+                            } else {
+                                downloadFolderError.text = qsTr("Choose an absolute, writable folder path.")
+                            }
+                        }
+                    }
+                    Button {
+                        id: openDownloadFolder
+                        text: qsTr("Open")
+                        onClicked: SystemProperties.openDownloadFolder()
+                    }
+                }
+                Label {
+                    id: downloadFolderError
+                    width: parent.width
+                    text: ""
+                    visible: text.length > 0
+                    wrapMode: Text.WordWrap
+                }
+
                 CheckBox {
                     id: menuAutoHideCheck
                     width: parent.width

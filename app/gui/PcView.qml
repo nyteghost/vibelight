@@ -17,7 +17,7 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 20
     bottomMargin: 5
-    cellWidth: 310; cellHeight: 330;
+    cellWidth: 350; cellHeight: 344;
     objectName: qsTr("Computers")
 
     Component.onCompleted: {
@@ -83,6 +83,46 @@ CenteredGridView {
         return model
     }
 
+    // Home dashboard: the header scrolls with the cards, keeping controller
+    // and keyboard GridView navigation unchanged.
+    header: Item {
+        width: pcGrid.width
+        height: pcGrid.count > 0 ? 108 : 0
+        visible: pcGrid.count > 0
+
+        Column {
+            anchors.left: parent.left
+            anchors.leftMargin: 24
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 22
+            spacing: 8
+
+            Label {
+                text: qsTr("YOUR COMPUTERS")
+                font.pixelSize: 12
+                font.bold: true
+                font.letterSpacing: 2
+                color: "#818CF8"
+            }
+            Label {
+                text: qsTr("Choose a host to start streaming")
+                font.pixelSize: 24
+                font.weight: Font.DemiBold
+                color: "#E2E8F0"
+                elide: Text.ElideRight
+                width: parent.width
+            }
+            Label {
+                text: qsTr("Select a computer to open its apps. Choose Display to change the monitor used next time.")
+                font.pixelSize: 13
+                color: "#94A3B8"
+                elide: Text.ElideRight
+                width: parent.width
+            }
+        }
+    }
+
     Row {
         anchors.centerIn: parent
         spacing: 5
@@ -108,18 +148,41 @@ CenteredGridView {
     model: computerModel
 
     delegate: NavigableItemDelegate {
-        width: 300; height: 320;
+        width: 338; height: 332;
         grid: pcGrid
 
         property alias pcContextMenu : pcContextMenuLoader.item
 
+        Rectangle {
+            id: availabilityBadge
+            anchors.top: parent.top
+            anchors.topMargin: 20
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            width: availabilityText.implicitWidth + 24
+            height: 28
+            radius: 14
+            color: model.statusUnknown ? "#1E293B" : (model.online ? "#123C35" : "#38232B")
+            border.color: model.statusUnknown ? "#475569" : (model.online ? "#166954" : "#6F3642")
+
+            Label {
+                id: availabilityText
+                anchors.centerIn: parent
+                text: model.statusUnknown ? qsTr("Checking") : (model.online ? qsTr("Online") : qsTr("Offline"))
+                color: model.statusUnknown ? "#CBD5E1" : (model.online ? "#86EFAC" : "#FDA4AF")
+                font.pixelSize: 12
+                font.bold: true
+            }
+        }
+
         Image {
             id: pcIcon
             anchors.horizontalCenter: parent.horizontalCenter
+            y: 65
             source: "qrc:/res/desktop_windows-48px.svg"
             sourceSize {
-                width: 200
-                height: 200
+                width: 110
+                height: 110
             }
         }
 
@@ -152,13 +215,54 @@ CenteredGridView {
             id: pcNameText
             text: model.name
 
-            width: parent.width
+            width: parent.width - 40
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: pcIcon.bottom
-            anchors.bottom: parent.bottom
-            font.pointSize: 36
+            anchors.topMargin: 12
+            height: 48
+            font.pixelSize: 25
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             elide: Text.ElideRight
+        }
+
+        Label {
+            id: hostStatus
+            anchors.top: pcNameText.bottom
+            anchors.topMargin: 2
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - 32
+            text: !model.online ? qsTr("Unavailable — open options to wake") :
+                  !model.paired ? qsTr("Pair this computer to continue") :
+                                  qsTr("Ready to stream")
+            color: "#94A3B8"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+
+        Label {
+            anchors.left: parent.left
+            anchors.leftMargin: 24
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 21
+            text: model.online ? qsTr("Select to connect") : qsTr("Right-click for options")
+            color: "#818CF8"
+            font.pixelSize: 13
+            font.bold: true
+        }
+
+        Button {
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            visible: model.online && model.paired
+            text: qsTr("Display…")
+            font.pixelSize: 12
+            onClicked: computerModel.chooseMonitorForComputer(index)
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Choose a physical or virtual monitor for this host")
         }
 
         Loader {

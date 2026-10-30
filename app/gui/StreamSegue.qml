@@ -16,7 +16,10 @@ Item {
     property bool isResume : false
     property bool quitAfter : false
     property int reconnectAttempt : 0
-    readonly property int maxReconnectAttempts : 3
+    // Bounded, gradually increasing delays provide a roughly 30-second
+    // recovery opportunity without repeatedly hammering a temporarily
+    // unavailable host. wantsReconnect() still vetoes intentional exits.
+    readonly property int maxReconnectAttempts : 5
 
     function stageStarting(stage)
     {
@@ -104,6 +107,11 @@ Item {
             return
         }
 
+        if (reconnectAttempt >= maxReconnectAttempts && session && session.wantsReconnect()) {
+            var exhausted = qsTr("Vibelight could not restore the connection after %1 attempts. Your session has ended; check the host and reconnect when it is available.").arg(maxReconnectAttempts)
+            streamSegueErrorDialog.text = streamSegueErrorDialog.text ? streamSegueErrorDialog.text + "\n\n" + exhausted : exhausted
+        }
+
         if (portTestResult !== 0 && portTestResult !== -1 && streamSegueErrorDialog.text) {
             streamSegueErrorDialog.text += "\n\n" + qsTr("This PC's Internet connection is blocking Vibelight. Streaming over the Internet may not work while connected to this network.")
         }
@@ -181,7 +189,7 @@ Item {
 
     Timer {
         id: reconnectDelayTimer
-        interval: 2500
+        interval: Math.min(8000, 2000 * reconnectAttempt)
         onTriggered: streamLoader.active = true
     }
 

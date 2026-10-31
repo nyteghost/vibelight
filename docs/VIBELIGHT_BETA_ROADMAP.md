@@ -146,3 +146,16 @@ Keyboard/controller and real-stream teardown testing remain required.
 These extend the existing phases. The host's read-only FPS guidance does not
 supply client RTT, delivered FPS or packet loss. A client telemetry contract,
 capability validation and tested setting transactions must precede Apply/Undo.
+
+## Connection Doctor companion checkpoint
+
+The Vibebeam beta now has a host-only Connection Doctor at `/v2/doctor`, with
+read-only fresh host snapshots and a previewable support summary. It distinguishes
+configured capture from observed capture and does not claim client compatibility,
+RTT, loss, delivered FPS, NVENC backend selection or display cleanup verification.
+The client-side doctor/telemetry contract remains future work.
+
+Next everyday-use priorities remain per-host profiles and quality presets. Quick
+Connect favorites, a focused in-session toolbar and a transfer center with
+checksum-verified resume complement the existing UI and reliability phases.
+Preserve the current pairing, streaming/input paths and manual overrides.

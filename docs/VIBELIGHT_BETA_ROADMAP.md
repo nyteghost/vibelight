@@ -102,3 +102,26 @@ transparent local rules/statistics; optional AI explanation can follow later.
       resource usage during streams, privacy boundaries, and Apply/Undo safety.
 
 **Implementation status:** roadmap only; these modes are not yet shipped.
+
+## October 31 continuation: reconnect controls
+
+- Added a visible, focused **Cancel reconnect** action and Escape shortcut during
+  retry delays. Cancellation discards the unstarted retry and returns to the host
+  UI without a host quit request. Once initialization begins, existing streaming
+  disconnect controls retain ownership of teardown.
+- Stop pending retry timers when leaving the page. Keep the five-attempt limit
+  and progressively bounded delay.
+- Wrap connection status within the available width on narrow windows.
+- Local Qt-free logic tests pass; the exact Windows build and hands-on QML tests
+  are still required. Do not interpret logic-test success as QML runtime coverage.
+
+Required manual cases: cancel the first and last delayed retry via mouse and
+Escape, leave the page during a wait, restore network before/after cancellation,
+retry manually afterward, exhaust all retries, and explicitly disconnect a
+healthy stream without triggering recovery. Check keyboard/gamepad focus at
+narrow and normal widths. Original source baseline `5d3baf80faf3` passed
+[Windows build](https://github.com/nyteghost/vibelight/actions/runs/41205790559);
+new commits require their own result before recommending a download.
+
+Host installation, UI and tray testing: see the companion repository's
+[CachyOS beta guide](https://github.com/nyteghost/vibebeam/blob/beta/host-download-20261028/docs/BETA_CACHYOS_TESTING.md).

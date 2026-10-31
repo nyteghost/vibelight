@@ -1,5 +1,5 @@
 import QtQuick 2.9
-import QtQuick.Controls 2.2
+import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.3
 
 NavigableDialog {
@@ -24,6 +24,12 @@ NavigableDialog {
         frameRate.value = profile.fps
         bitrate.value = profile.bitrateKbps
         adaptive.checked = profile.adaptiveBitrate
+        // Reset uncommitted editor text even if its numeric value did not change.
+        var controls = [videoWidth, videoHeight, frameRate, bitrate]
+        for (var i = 0; i < controls.length; i++) {
+            var control = controls[i]
+            control.contentItem.text = control.textFromValue(control.value, control.locale)
+        }
         problem = profile.invalid ? qsTr("The saved profile is invalid or from an unsupported version. Global defaults will be used until you explicitly save a replacement.") : ""
         open()
         custom.forceActiveFocus()
@@ -52,6 +58,7 @@ NavigableDialog {
 
     contentItem: ScrollView {
         id: scroll
+        implicitWidth: 440
         clip: true
         implicitHeight: Math.min(form.implicitHeight, Math.max(160, Overlay.overlay.height - 190))
         contentWidth: availableWidth

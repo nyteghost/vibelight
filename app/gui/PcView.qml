@@ -17,7 +17,10 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 20
     bottomMargin: 5
-    cellWidth: 350; cellHeight: 344;
+    // Fit one complete card on narrower windows while retaining the familiar
+    // 350px tile and keyboard/gamepad GridView navigation on larger screens.
+    cellWidth: Math.min(350, Math.max(260, width - 20))
+    cellHeight: 344
     objectName: qsTr("Computers")
 
     Component.onCompleted: {
@@ -87,7 +90,7 @@ CenteredGridView {
     // and keyboard GridView navigation unchanged.
     header: Item {
         width: pcGrid.width
-        height: pcGrid.count > 0 ? 108 : 0
+        height: pcGrid.count > 0 ? (pcGrid.width < 600 ? 126 : 108) : 0
         visible: pcGrid.count > 0
 
         Column {
@@ -114,10 +117,10 @@ CenteredGridView {
                 width: parent.width
             }
             Label {
-                text: qsTr("Select a computer to open its apps. Choose Display to change the monitor used next time.")
+                text: qsTr("Select a host to open its apps. Display chooses the monitor for your next stream.")
                 font.pixelSize: 13
                 color: "#94A3B8"
-                elide: Text.ElideRight
+                wrapMode: Text.WordWrap
                 width: parent.width
             }
         }
@@ -148,7 +151,8 @@ CenteredGridView {
     model: computerModel
 
     delegate: NavigableItemDelegate {
-        width: 338; height: 332;
+        width: pcGrid.cellWidth - 12
+        height: pcGrid.cellHeight - 12
         grid: pcGrid
 
         property alias pcContextMenu : pcContextMenuLoader.item
@@ -232,7 +236,8 @@ CenteredGridView {
             anchors.topMargin: 2
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width - 32
-            text: !model.online ? qsTr("Unavailable — open options to wake") :
+            text: model.statusUnknown ? qsTr("Checking host availability…") :
+                  !model.online ? (model.wakeable ? qsTr("Offline — Wake PC is available") : qsTr("Host offline — check connection")) :
                   !model.paired ? qsTr("Pair this computer to continue") :
                                   qsTr("Ready to stream")
             color: "#94A3B8"
@@ -246,7 +251,8 @@ CenteredGridView {
             anchors.leftMargin: 24
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 21
-            text: model.online ? qsTr("Select to connect") : qsTr("Right-click for options")
+            text: model.statusUnknown ? qsTr("Checking…") :
+                  model.online ? qsTr("Select to connect") : qsTr("Open for options")
             color: "#818CF8"
             font.pixelSize: 13
             font.bold: true
@@ -258,11 +264,12 @@ CenteredGridView {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 12
             visible: model.online && model.paired
+            focusPolicy: Qt.NoFocus // Card remains the keyboard/gamepad focus target
             text: qsTr("Display…")
             font.pixelSize: 12
             onClicked: computerModel.chooseMonitorForComputer(index)
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Choose a physical or virtual monitor for this host")
+            ToolTip.text: qsTr("Choose a physical or virtual monitor for this host (D key)")
         }
 
         Loader {
@@ -375,6 +382,15 @@ CenteredGridView {
             acceptedButtons: Qt.RightButton;
             onClicked: {
                 parent.pressAndHold()
+            }
+        }
+
+        // Keyboard alternative to the Display button; controller users can
+        // use the existing context menu to reach the same action.
+        Keys.onPressed: {
+            if (event.key === Qt.Key_D && model.online && model.paired) {
+                computerModel.chooseMonitorForComputer(index)
+                event.accepted = true
             }
         }
 

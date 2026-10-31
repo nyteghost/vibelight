@@ -2,6 +2,7 @@
 //   g++ -std=c++17 -Wall -Wextra -I app tests/logic_tests.cpp -o logic_tests && ./logic_tests
 
 #include "streaming/vibelight_logic.h"
+#include "settings/hostprofile.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -320,8 +321,23 @@ static void testHotkey()
     CHECK(offered + (int)std::string(taken).size() == 26);
 }
 
+static void testHostProfileBounds()
+{
+    using vibelight::HostProfile;
+    CHECK(HostProfile().valid());
+    CHECK((HostProfile{256, 8192, 10, 500, false}.valid()));
+    CHECK((HostProfile{8192, 256, 9999, 150000, true}.valid()));
+    CHECK(!(HostProfile{255, 1080, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 8193, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 0, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 10000, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 499, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 150001, false}.valid()));
+}
+
 int main()
 {
+    testHostProfileBounds();
     testKeys();
     testIdleSessionGuard();
     testBitrate();

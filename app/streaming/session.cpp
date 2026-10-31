@@ -591,7 +591,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
 }
 
 Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences)
-    : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
+    : m_Preferences(preferences ? preferences->cloneForSession() : StreamingPreferences::get()->forHost(computer->uuid)),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
       m_App(app),
@@ -613,6 +613,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0)
 {
+    m_Preferences->setParent(this);
 }
 
 Session::~Session()
@@ -2319,7 +2320,7 @@ void Session::tickAutoBitrate()
     if (!m_AutoBrStarted) {
         m_AutoBrStarted = true;
         m_AutoBrEnabled = !isSecondaryWindow() &&
-                          QSettings().value("vibelight/autoBitrate", false).toBool() &&
+                          m_Preferences->sessionAdaptiveBitrate() &&
                           !m_Computer->isNvidiaServerSoftware &&
                           m_StreamConfig.bitrate > 0;
         if (m_AutoBrEnabled) {

@@ -159,3 +159,18 @@ Next everyday-use priorities remain per-host profiles and quality presets. Quick
 Connect favorites, a focused in-session toolbar and a transfer center with
 checksum-verified resume complement the existing UI and reliability phases.
 Preserve the current pairing, streaming/input paths and manual overrides.
+
+## Per-host profiles: implemented on beta
+
+- Versioned client-local quality profiles keyed by discovered host identity;
+  resolution, FPS, bitrate ceiling and live adaptive bitrate toggle.
+- Host card summary and a keyboard-accessible profile editor with explicit Save,
+  Cancel and return-to-global behavior. Existing per-host monitor choice is shown
+  and preserved; codec/HDR/audio/input and other advanced settings inherit defaults.
+- Session-owned preference snapshots isolate hosts and global defaults. Explicit
+  CLI preferences bypass GUI profiles; reconnects clone the interrupted session's
+  snapshot rather than reading a newly edited profile.
+- Reject invalid values, preserve malformed/future entries until explicit action,
+  and surface storage errors. Add Qt Core persistence/isolation tests to CI.
+- See [profile behavior and smoke tests](HOST_PROFILES.md). Named presets/multiple
+  profiles per host, profile sync and live Apply/Undo remain future work.

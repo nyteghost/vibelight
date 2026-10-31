@@ -17,7 +17,8 @@ class ComputerModel : public QAbstractListModel
         WakeableRole,
         StatusUnknownRole,
         ServerSupportedRole,
-        DetailsRole
+        DetailsRole,
+        ProfileSummaryRole
     };
 
 public:
@@ -50,6 +51,8 @@ public:
     // monitorsReady. The choice is remembered per PC; an empty id means the host's own choice.
     Q_INVOKABLE void chooseMonitorForComputer(int computerIndex);
     Q_INVOKABLE void setMonitorForComputer(int computerIndex, QString monitorId);
+    Q_INVOKABLE QVariantMap profileForComputer(int computerIndex) const;
+    Q_INVOKABLE QString saveProfileForComputer(QString uuid, QVariantMap values, bool enabled);
 
 signals:
     void pairingCompleted(QVariant error);

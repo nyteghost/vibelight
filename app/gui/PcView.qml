@@ -239,7 +239,7 @@ CenteredGridView {
             text: model.statusUnknown ? qsTr("Checking host availability…") :
                   !model.online ? (model.wakeable ? qsTr("Offline — Wake PC is available") : qsTr("Host offline — check connection")) :
                   !model.paired ? qsTr("Pair this computer to continue") :
-                                  qsTr("Ready to stream")
+                                  qsTr("Ready · %1").arg(model.profileSummary)
             color: "#94A3B8"
             font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter
@@ -303,6 +303,11 @@ CenteredGridView {
                         computerModel.testConnectionForComputer(index)
                         testConnectionDialog.open()
                     }
+                }
+
+                NavigableMenuItem {
+                    text: qsTr("Streaming profile…")
+                    onTriggered: hostProfileDialog.edit(computerModel.profileForComputer(index))
                 }
 
                 NavigableMenuItem {
@@ -471,6 +476,11 @@ CenteredGridView {
             // Stop showing the spinner and show the image instead
             showSpinner = false
         }
+    }
+
+    HostProfileDialog {
+        id: hostProfileDialog
+        profileModel: computerModel
     }
 
     NavigableDialog {

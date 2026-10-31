@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <memory>
 #include "backend/nvhttp.h"
+#include "settings/hostprofilestore.h"
 
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
@@ -48,6 +49,13 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->state == NvComputer::CS_UNKNOWN;
     case ServerSupportedRole:
         return computer->isSupportedServerVersion;
+    case ProfileSummaryRole: {
+        QSettings settings;
+        const auto stored = vibelight::readHostProfile(settings, computer->uuid);
+        if (!stored.valid) return stored.exists ? tr("Global defaults (profile invalid)") : tr("Global defaults");
+        return tr("%1×%2 · %3 FPS · %4 Mbps").arg(stored.profile.width).arg(stored.profile.height)
+            .arg(stored.profile.fps).arg(stored.profile.bitrateKbps / 1000.0, 0, 'g', 4);
+    }
     case DetailsRole: {
         QString state, pairState;
 
@@ -116,6 +124,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[DetailsRole] = "details";
+    names[ProfileSummaryRole] = "profileSummary";
 
     return names;
 }
@@ -327,4 +336,44 @@ void ComputerModel::setMonitorForComputer(int computerIndex, QString monitorId)
     else {
         QSettings().setValue(key, monitorId);
     }
+}
+
+QVariantMap ComputerModel::profileForComputer(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return {};
+    auto computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    QSettings settings;
+    const auto stored = vibelight::readHostProfile(settings, computer->uuid);
+    const auto defaults = StreamingPreferences::get();
+    const auto profile = stored.valid ? stored.profile : vibelight::HostProfile{
+        defaults->width, defaults->height, defaults->fps, defaults->bitrateKbps,
+        settings.value("vibelight/autoBitrate", false).toBool()};
+    return {{"uuid", computer->uuid}, {"name", computer->name}, {"enabled", stored.valid},
+            {"invalid", stored.exists && !stored.valid}, {"width", profile.width}, {"height", profile.height},
+            {"fps", profile.fps}, {"bitrateKbps", profile.bitrateKbps}, {"adaptiveBitrate", profile.adaptiveBitrate},
+            {"monitor", settings.value("vibelight/monitor/" + computer->uuid).toString()}};
+}
+
+QString ComputerModel::saveProfileForComputer(QString uuid, QVariantMap values, bool enabled)
+{
+    bool known = false;
+    for (auto computer : m_Computers) {
+        QReadLocker lock(&computer->lock);
+        if (computer->uuid == uuid) { known = true; break; }
+    }
+    if (!known || vibelight::hostProfileKey(uuid).isEmpty()) return tr("This PC is no longer available. Reopen its profile.");
+    const auto object = QJsonObject::fromVariantMap(values);
+    const auto integer = [&object](const char* key) {
+        const auto value = object.value(QLatin1String(key));
+        return value.isDouble() ? value.toInt(-1) : -1;
+    };
+    const vibelight::HostProfile profile{integer("width"), integer("height"), integer("fps"), integer("bitrateKbps"), object.value("adaptiveBitrate").toBool()};
+    if (enabled && (!profile.valid() || !object.value("adaptiveBitrate").isBool())) return tr("Enter valid profile values before saving.");
+    QSettings settings;
+    if (!vibelight::writeHostProfile(settings, uuid, profile, enabled)) return tr("The profile could not be saved. Check local settings storage and try again.");
+    for (int row = 0; row < m_Computers.count(); ++row) {
+        if (m_Computers[row]->uuid == uuid) emit dataChanged(index(row), index(row), {ProfileSummaryRole});
+    }
+    return {};
 }

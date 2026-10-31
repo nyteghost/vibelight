@@ -9,8 +9,10 @@ NavigableDialog {
     property string hostName: ""
     property string monitorChoice: ""
     property string problem: ""
+    readonly property real hostWindowWidth: Overlay.overlay ? Overlay.overlay.width : (parent ? parent.width : 480)
+    readonly property real hostWindowHeight: Overlay.overlay ? Overlay.overlay.height : (parent ? parent.height : 600)
     title: qsTr("Streaming profile")
-    width: Math.min(480, Math.max(1, Overlay.overlay.width - 32))
+    width: Math.min(480, Math.max(1, profileDialog.hostWindowWidth - 32))
     closePolicy: Popup.CloseOnEscape
 
     function edit(profile) {
@@ -60,7 +62,7 @@ NavigableDialog {
         id: scroll
         implicitWidth: 440
         clip: true
-        implicitHeight: Math.min(form.implicitHeight, Math.max(160, Overlay.overlay.height - 190))
+        implicitHeight: Math.min(form.implicitHeight, Math.max(160, profileDialog.hostWindowHeight - 190))
         contentWidth: availableWidth
         ColumnLayout {
             id: form

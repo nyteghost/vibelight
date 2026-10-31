@@ -9,122 +9,10 @@ import SdlGamepadKeyNavigation 1.0
 import SystemProperties 1.0
 import AutoUpdateChecker 1.0
 
-Flickable {
+SettingsWorkspace {
     id: settingsPage
     objectName: qsTr("Settings")
-
     signal languageChanged()
-
-    boundsBehavior: Flickable.OvershootBounds
-
-    contentWidth: settingsColumn1.width > settingsColumn2.width ? settingsColumn1.width : settingsColumn2.width
-    contentHeight: settingsColumn1.height > settingsColumn2.height ? settingsColumn1.height : settingsColumn2.height
-
-    ScrollBar.vertical: ScrollBar {
-        anchors {
-            left: parent.right
-            leftMargin: -10
-        }
-    }
-
-    function isChildOfFlickable(item) {
-        while (item) {
-            if (item.parent === contentItem) {
-                return true
-            }
-
-            item = item.parent
-        }
-        return false
-    }
-
-    NumberAnimation on contentY {
-        id: autoScrollAnimation
-        duration: 100
-    }
-
-    // All the text a settings card shows (title, labels, checkbox text, buttons, selected combo
-    // entries), in lower case, so the search box can tell which cards match.
-    function collectText(item) {
-        var found = ""
-        if (typeof item.title === "string") {
-            found += " " + item.title
-        }
-        if (typeof item.text === "string") {
-            found += " " + item.text
-        }
-        if (typeof item.displayText === "string") {
-            found += " " + item.displayText
-        }
-        if (typeof item.placeholderText === "string") {
-            found += " " + item.placeholderText
-        }
-        var kids = item.children
-        for (var i = 0; i < kids.length; i++) {
-            found += collectText(kids[i])
-        }
-        return found.toLowerCase()
-    }
-
-    function applySearch(query) {
-        var words = query.toLowerCase().split(" ").filter(function(w) { return w !== "" })
-        var columns = [settingsColumn1, settingsColumn2]
-        var anyVisible = false
-
-        for (var c = 0; c < columns.length; c++) {
-            var cards = columns[c].children
-            for (var i = 0; i < cards.length; i++) {
-                var card = cards[i]
-                // Only the section cards take part (not the search box or the "no match" note)
-                if (card === settingsSearchField || card === noSettingsMatchLabel) {
-                    continue
-                }
-
-                var matches = true
-                if (words.length > 0) {
-                    var haystack = collectText(card)
-                    for (var w = 0; w < words.length; w++) {
-                        if (haystack.indexOf(words[w]) === -1) {
-                            matches = false
-                            break
-                        }
-                    }
-                }
-
-                card.visible = matches
-                anyVisible = anyVisible || matches
-            }
-        }
-
-        noSettingsMatchLabel.visible = words.length > 0 && !anyVisible
-    }
-
-    Window.onActiveFocusItemChanged: {
-        var item = Window.activeFocusItem
-        if (item) {
-            // Ignore non-child elements like the toolbar buttons
-            if (!isChildOfFlickable(item)) {
-                return
-            }
-
-            // Map the focus item's position into our content item's coordinate space
-            var pos = item.mapToItem(contentItem, 0, 0)
-
-            // Ensure some extra space is visible around the element we're scrolling to
-            var scrollMargin = height > 100 ? 50 : 0
-
-            if (pos.y - scrollMargin < contentY) {
-                autoScrollAnimation.from = contentY
-                autoScrollAnimation.to = Math.max(pos.y - scrollMargin, 0)
-                autoScrollAnimation.start()
-            }
-            else if (pos.y + item.height + scrollMargin > contentY + height) {
-                autoScrollAnimation.from = contentY
-                autoScrollAnimation.to = Math.min(pos.y + item.height + scrollMargin - height, contentHeight - height)
-                autoScrollAnimation.start()
-            }
-        }
-    }
 
     StackView.onActivated: {
         // This enables Tab and BackTab based navigation rather than arrow keys.
@@ -133,7 +21,7 @@ Flickable {
 
         // Highlight the first item if a gamepad is connected
         if (SdlGamepadKeyNavigation.getConnectedGamepads() > 0) {
-            resolutionComboBox.forceActiveFocus(Qt.TabFocus)
+            settingsPage.focusSearch()
         }
     }
 
@@ -150,42 +38,16 @@ Flickable {
         StreamingPreferences.save()
     }
 
-    Column {
-        padding: 10
-        id: settingsColumn1
-        width: settingsPage.width / 2
-        spacing: 15
-
-        TextField {
-            id: settingsSearchField
-            width: parent.width - (parent.leftPadding + parent.rightPadding)
-            placeholderText: qsTr("Search settings")
-            font.pointSize: 12
-            selectByMouse: true
-            onTextChanged: settingsPage.applySearch(text)
-            Keys.onEscapePressed: text = ""
-        }
-
-        Label {
-            id: noSettingsMatchLabel
-            width: parent.width - (parent.leftPadding + parent.rightPadding)
-            visible: false
-            text: qsTr("No settings match your search.")
-            font.pointSize: 12
-            wrapMode: Text.Wrap
-        }
-
-        CardGroupBox {
-            id: basicSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Basic Settings") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 5
-
+    CardGroupBox {
+        id: displaySettingsGroupBox
+        property var settingsCategories: ["displays"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Displays")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
                 Label {
                     width: parent.width
                     id: resFPStitle
@@ -744,90 +606,6 @@ Flickable {
 
                 Label {
                     width: parent.width
-                    id: bitrateTitle
-                    text: qsTr("Video bitrate:")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
-                }
-
-                Label {
-                    width: parent.width
-                    id: bitrateDesc
-                    text: qsTr("Lower the bitrate on slower connections. Raise the bitrate to increase image quality.")
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                }
-
-                Row {
-                    width: parent.width
-                    spacing: 5
-
-                    Slider {
-                        id: slider
-
-                        value: StreamingPreferences.bitrateKbps
-
-                        stepSize: 500
-                        from : 500
-                        to: StreamingPreferences.unlockBitrate ? 500000 : 150000
-
-                        snapMode: "SnapOnRelease"
-                        width: Math.min(bitrateDesc.implicitWidth, parent.width - (resetBitrateButton.visible ? resetBitrateButton.width + parent.spacing : 0))
-
-                        onValueChanged: {
-                            bitrateTitle.text = qsTr("Video bitrate: %1 Mbps").arg(value / 1000.0)
-                            StreamingPreferences.bitrateKbps = value
-                        }
-
-                        onMoved: {
-                            StreamingPreferences.autoAdjustBitrate = false
-                        }
-
-                        Component.onCompleted: {
-                            // Refresh the text after translations change
-                            languageChanged.connect(valueChanged)
-                        }
-                    }
-
-                    Button {
-                        id: resetBitrateButton
-                        text: qsTr("Use Default (%1 Mbps)").arg(StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444) / 1000.0)
-                        visible: StreamingPreferences.bitrateKbps !== StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
-                        onClicked: {
-                            var defaultBitrate = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
-                            StreamingPreferences.bitrateKbps = defaultBitrate
-                            StreamingPreferences.autoAdjustBitrate = true
-                            slider.value = defaultBitrate
-                        }
-                    }
-                }
-
-                Row {
-                    // Set by the "Check connection" button in the in-stream shortcuts menu
-                    property int suggestedKbps: SystemProperties.suggestedBitrateKbps()
-
-                    width: parent.width
-                    spacing: 10
-                    visible: suggestedKbps > 0 && suggestedKbps !== StreamingPreferences.bitrateKbps
-
-                    Label {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Your last connection check suggested %1 Mbps.").arg(parent.suggestedKbps / 1000.0)
-                        font.pointSize: 10
-                        opacity: 0.8
-                    }
-
-                    Button {
-                        text: qsTr("Use %1 Mbps").arg(parent.suggestedKbps / 1000.0)
-                        onClicked: {
-                            StreamingPreferences.autoAdjustBitrate = false
-                            slider.value = Math.min(parent.suggestedKbps, slider.to)
-                        }
-                    }
-                }
-
-                Label {
-                    width: parent.width
                     id: windowModeTitle
                     text: qsTr("Display mode")
                     font.pointSize: 12
@@ -916,7 +694,7 @@ Flickable {
                     spacing: 5
                     width: parent.width
 
-                    CheckBox {
+                    WrappingCheckBox {
                         id: vsyncCheck
                         hoverEnabled: true
                         text: qsTr("V-Sync")
@@ -932,7 +710,7 @@ Flickable {
                         ToolTip.text: qsTr("Disabling V-Sync allows sub-frame rendering latency, but it can display visible tearing")
                     }
 
-                    CheckBox {
+                    WrappingCheckBox {
                         id: framePacingCheck
                         hoverEnabled: true
                         text: qsTr("Frame pacing")
@@ -949,7 +727,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: enableHdr
                     width: parent.width
                     text: qsTr("Enable HDR")
@@ -971,21 +749,154 @@ Flickable {
                                     :
                                       qsTr("HDR streaming is not supported on this PC.")
                 }
-            }
+
         }
+    }
 
-        CardGroupBox {
+    CardGroupBox {
+        id: streamingSettingsGroupBox
+        property var settingsCategories: ["streaming"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Streaming quality")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                Label {
+                    width: parent.width
+                    id: bitrateTitle
+                    text: qsTr("Video bitrate:")
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
 
-            id: audioSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Audio Settings") + "</font>"
-            font.pointSize: 12
+                Label {
+                    width: parent.width
+                    id: bitrateDesc
+                    text: qsTr("Lower the bitrate on slower connections. Raise the bitrate to increase image quality.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
 
-            Column {
-                anchors.fill: parent
-                spacing: 5
+                Row {
+                    width: parent.width
+                    spacing: 5
 
+                    Slider {
+                        id: slider
+
+                        value: StreamingPreferences.bitrateKbps
+
+                        stepSize: 500
+                        from : 500
+                        to: StreamingPreferences.unlockBitrate ? 500000 : 150000
+
+                        snapMode: "SnapOnRelease"
+                        width: Math.min(bitrateDesc.implicitWidth, parent.width - (resetBitrateButton.visible ? resetBitrateButton.width + parent.spacing : 0))
+
+                        onValueChanged: {
+                            bitrateTitle.text = qsTr("Video bitrate: %1 Mbps").arg(value / 1000.0)
+                            StreamingPreferences.bitrateKbps = value
+                        }
+
+                        onMoved: {
+                            StreamingPreferences.autoAdjustBitrate = false
+                        }
+
+                        Component.onCompleted: {
+                            // Refresh the text after translations change
+                            languageChanged.connect(valueChanged)
+                        }
+                    }
+
+                    Button {
+                        id: resetBitrateButton
+                        text: qsTr("Use Default (%1 Mbps)").arg(StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444) / 1000.0)
+                        visible: StreamingPreferences.bitrateKbps !== StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+                        onClicked: {
+                            var defaultBitrate = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
+                            StreamingPreferences.bitrateKbps = defaultBitrate
+                            StreamingPreferences.autoAdjustBitrate = true
+                            slider.value = defaultBitrate
+                        }
+                    }
+                }
+
+                Row {
+                    // Set by the "Check connection" button in the in-stream shortcuts menu
+                    property int suggestedKbps: SystemProperties.suggestedBitrateKbps()
+
+                    width: parent.width
+                    spacing: 10
+                    visible: suggestedKbps > 0 && suggestedKbps !== StreamingPreferences.bitrateKbps
+
+                    Label {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Your last connection check suggested %1 Mbps.").arg(parent.suggestedKbps / 1000.0)
+                        font.pointSize: 10
+                        opacity: 0.8
+                    }
+
+                    Button {
+                        text: qsTr("Use %1 Mbps").arg(parent.suggestedKbps / 1000.0)
+                        onClicked: {
+                            StreamingPreferences.autoAdjustBitrate = false
+                            slider.value = Math.min(parent.suggestedKbps, slider.to)
+                        }
+                    }
+                }
+
+                WrappingCheckBox {
+                    id: autoBitrateCheck
+                    width: parent.width
+                    text: qsTr("Adjust the video bitrate automatically while streaming")
+                    font.pointSize: 12
+                    checked: SystemProperties.autoBitrate()
+                    onClicked: SystemProperties.setAutoBitrate(checked)
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 9000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Lowers the bitrate when frames are being lost and raises it again, slowly, once the connection stays clean. It never goes above the bitrate you chose. Needs a Vibebeam host or another Apollo-style host; with a standard Sunshine host it turns itself off. Off by default. Takes effect the next time you start a stream.")
+                }
+
+                Row {
+                    spacing: 10
+                    width: parent.width
+
+                    Label {
+                        text: qsTr("Bitrate notification position:")
+                        font.pointSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    AutoResizingComboBox {
+                        id: autoBitrateNotificationPosition
+                        enabled: autoBitrateCheck.checked
+                        model: [qsTr("Top center"), qsTr("Bottom right")]
+                        currentIndex: SystemProperties.autoBitrateNotificationPosition()
+                        onActivated: SystemProperties.setAutoBitrateNotificationPosition(currentIndex)
+
+                        ToolTip.delay: 1000
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Choose where automatic bitrate change messages appear while streaming. Takes effect on the next notification.")
+                    }
+                }
+
+        }
+    }
+
+    CardGroupBox {
+        id: audioSettingsGroupBox
+        property var settingsCategories: ["streaming"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Audio")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
                 Label {
                     width: parent.width
                     id: resAudioTitle
@@ -1033,7 +944,7 @@ Flickable {
                 }
 
 
-                CheckBox {
+                WrappingCheckBox {
                     id: audioPcCheck
                     width: parent.width
                     text: qsTr("Mute host PC speakers while streaming")
@@ -1049,7 +960,7 @@ Flickable {
                     ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: muteOnFocusLossCheck
                     width: parent.width
                     text: qsTr("Mute audio stream when Vibelight is not the active window")
@@ -1065,21 +976,21 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Mutes Vibelight's audio when you Alt+Tab out of the stream or click on a different window.")
                 }
-            }
+
         }
+    }
 
-        CardGroupBox {
-            id: hostSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Host Settings") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 5
-
-                CheckBox {
+    CardGroupBox {
+        id: hostSettingsGroupBox
+        property var settingsCategories: ["connections"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Connections & session safety")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                WrappingCheckBox {
                     id: optimizeGameSettingsCheck
                     width: parent.width
                     text: qsTr("Optimize game settings for streaming")
@@ -1090,7 +1001,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: quitAppAfter
                     width: parent.width
                     text: qsTr("Quit app on host PC after ending stream")
@@ -1106,7 +1017,7 @@ Flickable {
                     ToolTip.text: qsTr("This will close the app or game you are streaming when you end your stream. You will lose any unsaved progress!")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: autoReconnectCheck
                     width: parent.width
                     text: qsTr("Automatically reconnect if the stream drops")
@@ -1119,22 +1030,35 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 7000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("If the connection is lost in the middle of a stream (a Wi-Fi blip, for example), Vibelight tries up to 3 times to resume it instead of returning to the PC list. Quitting the stream yourself never triggers this.")
+                    ToolTip.text: qsTr("If the connection is lost in the middle of a stream (a Wi-Fi blip, for example), Vibelight tries up to 5 times to resume it instead of returning to the PC list. Quitting the stream yourself never triggers this.")
                 }
-            }
+
+                WrappingCheckBox {
+                    id: idleDisconnectCheck
+                    width: parent.width
+                    text: qsTr("Ask if I'm still here after 30 minutes without input")
+                    font.pointSize: 12
+                    checked: SystemProperties.idleDisconnectEnabled()
+                    onClicked: SystemProperties.setIdleDisconnectEnabled(checked)
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 9000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("After 30 minutes without keyboard, mouse, touch or controller input, Vibelight asks 'Is anyone there?' and gives you 2 minutes to confirm. If no one responds, it gracefully ends the stream, asks Vibebeam to stop the host app and clean up its virtual displays, and closes Vibelight. On by default. Takes effect next stream.")
+                }
+
         }
+    }
 
-        CardGroupBox {
-            id: uiSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("UI Settings") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 5
-
+    CardGroupBox {
+        id: uiSettingsGroupBox
+        property var settingsCategories: ["interface"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Interface")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
                 Label {
                     width: parent.width
                     id: languageTitle
@@ -1355,7 +1279,7 @@ Flickable {
                         ListElement {
                             text: qsTr("Maximized")
                             val: StreamingPreferences.UI_MAXIMIZED
-                        }   
+                        }
                         ListElement {
                             text: qsTr("Fullscreen")
                             val: StreamingPreferences.UI_FULLSCREEN
@@ -1367,7 +1291,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: connectionWarningsCheck
                     width: parent.width
                     text: qsTr("Show connection quality warnings")
@@ -1378,7 +1302,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: configurationWarningsCheck
                     width: parent.width
                     text: qsTr("Show configuration warnings")
@@ -1389,7 +1313,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     visible: SystemProperties.hasDiscordIntegration
                     id: discordPresenceCheck
                     width: parent.width
@@ -1406,7 +1330,7 @@ Flickable {
                     ToolTip.text: qsTr("Updates your Discord status to display the name of the game you're streaming.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: keepAwakeCheck
                     width: parent.width
                     text: qsTr("Keep the display awake while streaming")
@@ -1421,30 +1345,21 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Prevents the screensaver from starting or the display from going to sleep while streaming.")
                 }
-            }
+
         }
     }
 
-    Column {
-        padding: 10
-        rightPadding: 20
-        anchors.left: settingsColumn1.right
-        id: settingsColumn2
-        width: settingsPage.width / 2
-        spacing: 15
-
-        CardGroupBox {
-            id: inputSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Input Settings") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 5
-
-                CheckBox {
+    CardGroupBox {
+        id: inputSettingsGroupBox
+        property var settingsCategories: ["input"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Mouse, keyboard & shortcuts")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                WrappingCheckBox {
                     id: absoluteMouseCheck
                     hoverEnabled: true
                     width: parent.width
@@ -1467,7 +1382,7 @@ Flickable {
                     spacing: 5
                     width: parent.width
 
-                    CheckBox {
+                    WrappingCheckBox {
                         id: captureSysKeysCheck
                         hoverEnabled: true
                         text: qsTr("Capture system keyboard shortcuts")
@@ -1538,7 +1453,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: absoluteTouchCheck
                     hoverEnabled: true
                     width: parent.width
@@ -1555,7 +1470,7 @@ Flickable {
                     ToolTip.text: qsTr("When checked, the touchscreen acts like a trackpad. When unchecked, the touchscreen will directly control the mouse pointer.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: swapMouseButtonsCheck
                     hoverEnabled: true
                     width: parent.width
@@ -1567,7 +1482,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: reverseScrollButtonsCheck
                     hoverEnabled: true
                     width: parent.width
@@ -1579,113 +1494,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
-                    id: clipboardAutoSyncCheck
-                    width: parent.width
-                    text: qsTr("Sync the clipboard automatically while streaming (text only)")
-                    font.pointSize: 12
-                    checked: SystemProperties.clipboardAutoSync()
-                    onClicked: SystemProperties.setClipboardAutoSync(checked)
-
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 9000
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Copy on this PC and paste on the host, or the other way round, with no extra steps. Text only, up to 1 MB. Needs a Vibebeam host and the clipboard permissions for this device. Anything you copy, including passwords from a password manager, is sent to the host while this is on. Off by default. Takes effect the next time you start a stream.")
-                }
-
-                CheckBox {
-                    id: autoBitrateCheck
-                    width: parent.width
-                    text: qsTr("Adjust the video bitrate automatically while streaming")
-                    font.pointSize: 12
-                    checked: SystemProperties.autoBitrate()
-                    onClicked: SystemProperties.setAutoBitrate(checked)
-
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 9000
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Lowers the bitrate when frames are being lost and raises it again, slowly, once the connection stays clean. It never goes above the bitrate you chose. Needs a Vibebeam host or another Apollo-style host; with a standard Sunshine host it turns itself off. Off by default. Takes effect the next time you start a stream.")
-                }
-
-                Row {
-                    spacing: 10
-                    width: parent.width
-
-                    Label {
-                        text: qsTr("Bitrate notification position:")
-                        font.pointSize: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    AutoResizingComboBox {
-                        id: autoBitrateNotificationPosition
-                        enabled: autoBitrateCheck.checked
-                        model: [qsTr("Top center"), qsTr("Bottom right")]
-                        currentIndex: SystemProperties.autoBitrateNotificationPosition()
-                        onActivated: SystemProperties.setAutoBitrateNotificationPosition(currentIndex)
-
-                        ToolTip.delay: 1000
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Choose where automatic bitrate change messages appear while streaming. Takes effect on the next notification.")
-                    }
-                }
-
-                Label {
-                    width: parent.width
-                    text: qsTr("Received files folder (host to this PC):")
-                    font.pointSize: 12
-                }
-                Row {
-                    spacing: 8
-                    width: parent.width
-                    TextField {
-                        id: downloadFolderInput
-                        width: Math.max(180, parent.width - saveDownloadFolder.width - openDownloadFolder.width - 24)
-                        text: SystemProperties.downloadFolder()
-                        placeholderText: qsTr("Full path to download folder")
-                        selectByMouse: true
-                        onAccepted: saveDownloadFolder.clicked()
-                    }
-                    Button {
-                        id: saveDownloadFolder
-                        text: qsTr("Save")
-                        onClicked: {
-                            if (SystemProperties.setDownloadFolder(downloadFolderInput.text)) {
-                                downloadFolderInput.text = SystemProperties.downloadFolder()
-                                downloadFolderError.text = ""
-                            } else {
-                                downloadFolderError.text = qsTr("Choose an absolute, writable folder path.")
-                            }
-                        }
-                    }
-                    Button {
-                        id: openDownloadFolder
-                        text: qsTr("Open")
-                        onClicked: SystemProperties.openDownloadFolder()
-                    }
-                }
-                Label {
-                    id: downloadFolderError
-                    width: parent.width
-                    text: ""
-                    visible: text.length > 0
-                    wrapMode: Text.WordWrap
-                }
-
-                CheckBox {
-                    id: idleDisconnectCheck
-                    width: parent.width
-                    text: qsTr("Ask if I'm still here after 30 minutes without input")
-                    font.pointSize: 12
-                    checked: SystemProperties.idleDisconnectEnabled()
-                    onClicked: SystemProperties.setIdleDisconnectEnabled(checked)
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 9000
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("After 30 minutes without keyboard, mouse, touch or controller input, Vibelight asks 'Is anyone there?' and gives you 2 minutes to confirm. If no one responds, it gracefully ends the stream, asks Vibebeam to stop the host app and clean up its virtual displays, and closes Vibelight. On by default. Takes effect next stream.")
-                }
-
-                CheckBox {
+                WrappingCheckBox {
                     id: menuAutoHideCheck
                     width: parent.width
                     text: qsTr("Hide the shortcuts button until I press the hotkey")
@@ -1719,7 +1528,7 @@ Flickable {
                     ToolTip.text: qsTr("The last key of the combination that shows the shortcuts menu while streaming. Only letters that Vibelight doesn't already use are offered. Takes effect the next time you start a stream.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: ctrlAltReleaseMouseCheck
                     width: parent.width
                     text: qsTr("Hold Ctrl+Alt+Z to release the mouse")
@@ -1735,21 +1544,21 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("While you hold the left Alt, Ctrl and Z keys, the mouse is freed so you can move it outside the stream window or click the shortcuts button. Release the keys to capture it again.")
                 }
-            }
+
         }
+    }
 
-        CardGroupBox {
-            id: gamepadSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Gamepad Settings") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 5
-
-                CheckBox {
+    CardGroupBox {
+        id: gamepadSettingsGroupBox
+        property var settingsCategories: ["input"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Controllers")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                WrappingCheckBox {
                     id: swapFaceButtonsCheck
                     width: parent.width
                     text: qsTr("Swap A/B and X/Y gamepad buttons")
@@ -1765,7 +1574,7 @@ Flickable {
                     ToolTip.text: qsTr("This switches gamepads into a Nintendo-style button layout")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: singleControllerCheck
                     width: parent.width
                     text: qsTr("Force gamepad #1 always connected")
@@ -1782,7 +1591,7 @@ Flickable {
                                   qsTr("Only enable this option when streaming a game that doesn't support gamepads being connected after startup.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: gamepadMouseCheck
                     hoverEnabled: true
                     width: parent.width
@@ -1794,7 +1603,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: backgroundGamepadCheck
                     width: parent.width
                     text: qsTr("Process gamepad input when Vibelight is in the background")
@@ -1810,20 +1619,89 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Allows Vibelight to capture gamepad inputs even if it's not the current window in focus")
                 }
-            }
+
         }
+    }
 
-        CardGroupBox {
-            id: advancedSettingsGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Advanced Settings") + "</font>"
-            font.pointSize: 12
+    CardGroupBox {
+        id: transferSettingsGroupBox
+        property var settingsCategories: ["transfers"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Transfers & clipboard")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                WrappingCheckBox {
+                    id: clipboardAutoSyncCheck
+                    width: parent.width
+                    text: qsTr("Sync the clipboard automatically while streaming (text only)")
+                    font.pointSize: 12
+                    checked: SystemProperties.clipboardAutoSync()
+                    onClicked: SystemProperties.setClipboardAutoSync(checked)
 
-            Column {
-                anchors.fill: parent
-                spacing: 5
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 9000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Copy on this PC and paste on the host, or the other way round, with no extra steps. Text only, up to 1 MB. Needs a Vibebeam host and the clipboard permissions for this device. Anything you copy, including passwords from a password manager, is sent to the host while this is on. Off by default. Takes effect the next time you start a stream.")
+                }
 
+                Label {
+                    width: parent.width
+                    text: qsTr("Received files folder (host to this PC):")
+                    font.pointSize: 12
+                }
+                Flow {
+                    spacing: 8
+                    width: parent.width
+                    TextField {
+                        id: downloadFolderInput
+                        width: Math.max(1, parent.width - saveDownloadFolder.width - openDownloadFolder.width - 24)
+                        text: SystemProperties.downloadFolder()
+                        placeholderText: qsTr("Full path to download folder")
+                        selectByMouse: true
+                        onAccepted: saveDownloadFolder.clicked()
+                    }
+                    Button {
+                        id: saveDownloadFolder
+                        text: qsTr("Save")
+                        onClicked: {
+                            if (SystemProperties.setDownloadFolder(downloadFolderInput.text)) {
+                                downloadFolderInput.text = SystemProperties.downloadFolder()
+                                downloadFolderError.text = ""
+                            } else {
+                                downloadFolderError.text = qsTr("Choose an absolute, writable folder path.")
+                            }
+                        }
+                    }
+                    Button {
+                        id: openDownloadFolder
+                        text: qsTr("Open")
+                        onClicked: SystemProperties.openDownloadFolder()
+                    }
+                }
+                Label {
+                    id: downloadFolderError
+                    width: parent.width
+                    text: ""
+                    visible: text.length > 0
+                    wrapMode: Text.WordWrap
+                }
+
+        }
+    }
+
+    CardGroupBox {
+        id: advancedSettingsGroupBox
+        property var settingsCategories: ["advanced"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Advanced video & decoding")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
                 Label {
                     width: parent.width
                     id: resVDSTitle
@@ -1985,7 +1863,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: enableYUV444
                     width: parent.width
                     text: qsTr("Enable YUV 4:4:4")
@@ -2015,7 +1893,7 @@ Flickable {
                                       qsTr("YUV 4:4:4 is not supported on this PC.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: unlockBitrate
                     width: parent.width
                     text: qsTr("Unlock bitrate limit (Experimental)")
@@ -2034,7 +1912,7 @@ Flickable {
                     ToolTip.text: qsTr("This unlocks extremely high video bitrates for use with Sunshine hosts. It should only be used when streaming over an Ethernet LAN connection.")
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: enableMdns
                     width: parent.width
                     text: qsTr("Automatically find PCs on the local network (Recommended)")
@@ -2055,7 +1933,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: detectNetworkBlocking
                     width: parent.width
                     text: qsTr("Automatically detect blocked connections (Recommended)")
@@ -2066,7 +1944,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                WrappingCheckBox {
                     id: showPerformanceOverlay
                     width: parent.width
                     text: qsTr("Show performance stats while streaming")
@@ -2083,20 +1961,20 @@ Flickable {
                                   qsTr("You can toggle it at any time while streaming using Ctrl+Alt+Shift+S or Select+L1+R1+X.") + "\n\n" +
                                   qsTr("The performance overlay is not supported on Steam Link or Raspberry Pi.")
                 }
-            }
+
         }
+    }
 
-        CardGroupBox {
-            id: supportGroupBox
-            width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"#A5B4FC\">" + qsTr("Support") + "</font>"
-            font.pointSize: 12
-
-            Column {
-                anchors.fill: parent
-                spacing: 8
-
+    CardGroupBox {
+        id: updatesGroupBox
+        property var settingsCategories: ["updates"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Updates")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
                 Label {
                     width: parent.width
                     text: qsTr("Version %1").arg(SystemProperties.buildString)
@@ -2104,15 +1982,8 @@ Flickable {
                     wrapMode: Text.Wrap
                 }
 
-                Label {
+                Flow {
                     width: parent.width
-                    text: qsTr("If something breaks, save a diagnostics file and send it along with a description of what happened. It contains your version, system details and the end of the latest log. The log can include PC names and local IP addresses.")
-                    font.pointSize: 10
-                    wrapMode: Text.Wrap
-                    opacity: 0.8
-                }
-
-                Row {
                     spacing: 10
 
                     Button {
@@ -2195,6 +2066,27 @@ Flickable {
                     }
                 }
 
+        }
+    }
+
+    CardGroupBox {
+        id: supportGroupBox
+        property var settingsCategories: ["diagnostics"]
+        width: parent.width
+        padding: 16
+        title: qsTr("Diagnostics & support")
+        font.pointSize: 12
+        Column {
+            anchors.fill: parent
+            spacing: 8
+                Label {
+                    width: parent.width
+                    text: qsTr("If something breaks, save a diagnostics file and send it along with a description of what happened. It contains your version, system details and the end of the latest log. The log can include PC names and local IP addresses.")
+                    font.pointSize: 10
+                    wrapMode: Text.Wrap
+                    opacity: 0.8
+                }
+
                 Flow {
                     width: parent.width
                     spacing: 10
@@ -2252,7 +2144,8 @@ Flickable {
                     font.pointSize: 10
                     wrapMode: Text.WrapAnywhere
                 }
-            }
+
         }
     }
+
 }

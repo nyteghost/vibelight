@@ -5,6 +5,8 @@
         <file>gui/HostProfileDialog.qml</file>
         <file>gui/AppView.qml</file>
         <file>gui/SettingsView.qml</file>
+        <file>gui/SettingsWorkspace.qml</file>
+        <file>gui/WrappingCheckBox.qml</file>
         <file>gui/StreamSegue.qml</file>
         <file>gui/WhatsNewDialog.qml</file>
         <file>gui/DifferencesDialog.qml</file>

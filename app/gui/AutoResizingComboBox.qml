@@ -21,6 +21,7 @@ ComboBox {
     }
 
     function recalculateWidth() {
+        if (!textMetrics || !popupMetrics || !indicator) return
         textMetrics.font = font
         popupMetrics.font = popup.font
         textWidth = 0
@@ -35,6 +36,9 @@ ComboBox {
     // We call this every time the options change (and init)
     // so we can adjust the combo box width here too
     onActivated: recalculateWidth()
+    Component.onCompleted: Qt.callLater(recalculateWidth)
+    onCountChanged: Qt.callLater(recalculateWidth)
+    onFontChanged: Qt.callLater(recalculateWidth)
 
     popup.onAboutToShow: {
         // Switch to normal navigation for combo boxes

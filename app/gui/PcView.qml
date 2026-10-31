@@ -102,14 +102,14 @@ CenteredGridView {
             spacing: 8
 
             Label {
-                text: qsTr("YOUR COMPUTERS")
+                text: qsTr("YOUR COMPUTERS · %1").arg(pcGrid.count)
                 font.pixelSize: 12
                 font.bold: true
                 font.letterSpacing: 2
                 color: "#818CF8"
             }
             Label {
-                text: qsTr("Choose a host to start streaming")
+                text: qsTr("Your streaming workspace")
                 font.pixelSize: 24
                 font.weight: Font.DemiBold
                 color: "#E2E8F0"
@@ -117,7 +117,7 @@ CenteredGridView {
                 width: parent.width
             }
             Label {
-                text: qsTr("Select a host to open its apps. Display chooses the monitor for your next stream.")
+                text: qsTr("Open a host for apps. Profile saves its quality settings; Display chooses its monitor.")
                 font.pixelSize: 13
                 color: "#94A3B8"
                 wrapMode: Text.WordWrap
@@ -246,16 +246,17 @@ CenteredGridView {
             elide: Text.ElideRight
         }
 
-        Label {
+        Button {
             anchors.left: parent.left
-            anchors.leftMargin: 24
+            anchors.leftMargin: 20
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 21
-            text: model.statusUnknown ? qsTr("Checking…") :
-                  model.online ? qsTr("Select to connect") : qsTr("Open for options")
-            color: "#818CF8"
-            font.pixelSize: 13
-            font.bold: true
+            anchors.bottomMargin: 12
+            focusPolicy: Qt.NoFocus
+            text: qsTr("Profile…")
+            font.pixelSize: 12
+            onClicked: hostProfileDialog.edit(computerModel.profileForComputer(index))
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Set streaming quality for this PC (P key)")
         }
 
         Button {
@@ -395,6 +396,9 @@ CenteredGridView {
         Keys.onPressed: {
             if (event.key === Qt.Key_D && model.online && model.paired) {
                 computerModel.chooseMonitorForComputer(index)
+                event.accepted = true
+            } else if (event.key === Qt.Key_P) {
+                hostProfileDialog.edit(computerModel.profileForComputer(index))
                 event.accepted = true
             }
         }

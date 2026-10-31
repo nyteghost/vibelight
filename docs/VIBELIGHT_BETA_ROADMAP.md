@@ -24,8 +24,9 @@ All UI work first targets `beta/next-features-20261028`.
       refresh-rate selection and last-known selection.
 - [ ] Introduce in-session controls for quality, screenshots, files, monitors,
       and disconnect, without interrupting the streaming path.
-- [ ] Reorganize settings: Connections, Displays, Streaming, Transfers,
-      Diagnostics and Updates; preserve advanced configuration.
+- [x] Reorganize settings into a responsive categorized workspace with global
+      search, dedicated transfer/diagnostic/update sections and advanced controls.
+      Automated UI checks pass; real-device/controller smoke testing remains.
 
 ## Phase 2 — resilience and picture quality
 
@@ -174,3 +175,32 @@ Preserve the current pairing, streaming/input paths and manual overrides.
   and surface storage errors. Add Qt Core persistence/isolation tests to CI.
 - See [profile behavior and smoke tests](HOST_PROFILES.md). Named presets/multiple
   profiles per host, profile sync and live Apply/Undo remain future work.
+
+## Visual remodel: settings workspace and dashboard actions
+
+- Replace the two long settings columns with a fixed search/header and category
+  navigation: Connections, Displays, Streaming & audio, Input & controllers,
+  Interface, Transfers & clipboard, Diagnostics, Updates and Advanced.
+- Use a sidebar on wide windows and a section picker on compact windows. Keep a
+  single readable content column, keyboard focus scrolling and explicit empty
+  search results. Search spans every category; clearing returns to the selected
+  section. Choosing another section clears the query.
+- Split mixed cards so adaptive bitrate belongs to Streaming, received-file and
+  clipboard controls belong to Transfers, and update actions are separated from
+  diagnostics. Controls remain instantiated while hidden, preserving drafts and
+  signal connections. Existing preference write expressions are preserved.
+- Add a direct Profile action and P shortcut to each host card alongside Display/D;
+  retain the controller context menu and existing host launch behavior.
+- Qt Quick tests cover category/search navigation, compact layout, focus, and
+  preserving control state without preference writes when filtering.
+
+This is a settings/navigation and dashboard UI increment. The full monitor
+manager, in-session toolbar, transfer center, presets and final visual polish
+remain open work; real keyboard/controller and streaming smoke tests still apply.
+
+Validation for the settings increment: 13 Qt Quick checks pass locally (including
+profile-editor lifecycle checks), plus a full-page render using stubbed host/system
+interfaces at desktop and narrow sizes. The full-page preview preserves every
+preference property across category changes and search. Original settings/control
+IDs and preference-write expressions were checked before and after regrouping.
+Live streaming, actual display hardware and controller checks remain manual gates.

@@ -18,6 +18,11 @@ public:
 
     void reload();
 
+    // Session-owned copies prevent host overrides and runtime fallbacks leaking globally.
+    StreamingPreferences* cloneForSession() const;
+    StreamingPreferences* forHost(const QString& uuid) const;
+    bool sessionAdaptiveBitrate() const { return m_SessionAdaptiveBitrate; }
+
     enum AudioConfig
     {
         AC_STEREO,
@@ -251,5 +256,7 @@ private:
     QString getSuffixFromLanguage(Language lang);
 
     QQmlEngine* m_QmlEngine;
+    bool m_IsSessionSnapshot = false;
+    bool m_SessionAdaptiveBitrate = false;
 };
 

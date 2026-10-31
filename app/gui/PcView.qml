@@ -17,7 +17,10 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 20
     bottomMargin: 5
-    cellWidth: 310; cellHeight: 330;
+    // Fit one complete card on narrower windows while retaining the familiar
+    // 350px tile and keyboard/gamepad GridView navigation on larger screens.
+    cellWidth: Math.min(350, Math.max(260, width - 20))
+    cellHeight: 344
     objectName: qsTr("Computers")
 
     Component.onCompleted: {
@@ -83,6 +86,46 @@ CenteredGridView {
         return model
     }
 
+    // Home dashboard: the header scrolls with the cards, keeping controller
+    // and keyboard GridView navigation unchanged.
+    header: Item {
+        width: pcGrid.width
+        height: pcGrid.count > 0 ? (pcGrid.width < 600 ? 126 : 108) : 0
+        visible: pcGrid.count > 0
+
+        Column {
+            anchors.left: parent.left
+            anchors.leftMargin: 24
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 22
+            spacing: 8
+
+            Label {
+                text: qsTr("YOUR COMPUTERS · %1").arg(pcGrid.count)
+                font.pixelSize: 12
+                font.bold: true
+                font.letterSpacing: 2
+                color: "#818CF8"
+            }
+            Label {
+                text: qsTr("Your streaming workspace")
+                font.pixelSize: 24
+                font.weight: Font.DemiBold
+                color: "#E2E8F0"
+                elide: Text.ElideRight
+                width: parent.width
+            }
+            Label {
+                text: qsTr("Open a host for apps. Profile saves its quality settings; Display chooses its monitor.")
+                font.pixelSize: 13
+                color: "#94A3B8"
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+        }
+    }
+
     Row {
         anchors.centerIn: parent
         spacing: 5
@@ -108,18 +151,42 @@ CenteredGridView {
     model: computerModel
 
     delegate: NavigableItemDelegate {
-        width: 300; height: 320;
+        width: pcGrid.cellWidth - 12
+        height: pcGrid.cellHeight - 12
         grid: pcGrid
 
         property alias pcContextMenu : pcContextMenuLoader.item
 
+        Rectangle {
+            id: availabilityBadge
+            anchors.top: parent.top
+            anchors.topMargin: 20
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            width: availabilityText.implicitWidth + 24
+            height: 28
+            radius: 14
+            color: model.statusUnknown ? "#1E293B" : (model.online ? "#123C35" : "#38232B")
+            border.color: model.statusUnknown ? "#475569" : (model.online ? "#166954" : "#6F3642")
+
+            Label {
+                id: availabilityText
+                anchors.centerIn: parent
+                text: model.statusUnknown ? qsTr("Checking") : (model.online ? qsTr("Online") : qsTr("Offline"))
+                color: model.statusUnknown ? "#CBD5E1" : (model.online ? "#86EFAC" : "#FDA4AF")
+                font.pixelSize: 12
+                font.bold: true
+            }
+        }
+
         Image {
             id: pcIcon
             anchors.horizontalCenter: parent.horizontalCenter
+            y: 65
             source: "qrc:/res/desktop_windows-48px.svg"
             sourceSize {
-                width: 200
-                height: 200
+                width: 110
+                height: 110
             }
         }
 
@@ -152,13 +219,58 @@ CenteredGridView {
             id: pcNameText
             text: model.name
 
-            width: parent.width
+            width: parent.width - 40
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: pcIcon.bottom
-            anchors.bottom: parent.bottom
-            font.pointSize: 36
+            anchors.topMargin: 12
+            height: 48
+            font.pixelSize: 25
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             elide: Text.ElideRight
+        }
+
+        Label {
+            id: hostStatus
+            anchors.top: pcNameText.bottom
+            anchors.topMargin: 2
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - 32
+            text: model.statusUnknown ? qsTr("Checking host availability…") :
+                  !model.online ? (model.wakeable ? qsTr("Offline — Wake PC is available") : qsTr("Host offline — check connection")) :
+                  !model.paired ? qsTr("Pair this computer to continue") :
+                                  qsTr("Ready · %1").arg(model.profileSummary)
+            color: "#94A3B8"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+
+        Button {
+            anchors.left: parent.left
+            anchors.leftMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            focusPolicy: Qt.NoFocus
+            text: qsTr("Profile…")
+            font.pixelSize: 12
+            onClicked: hostProfileDialog.edit(computerModel.profileForComputer(index))
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Set streaming quality for this PC (P key)")
+        }
+
+        Button {
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            visible: model.online && model.paired
+            focusPolicy: Qt.NoFocus // Card remains the keyboard/gamepad focus target
+            text: qsTr("Display…")
+            font.pixelSize: 12
+            onClicked: computerModel.chooseMonitorForComputer(index)
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Choose a physical or virtual monitor for this host (D key)")
         }
 
         Loader {
@@ -192,6 +304,11 @@ CenteredGridView {
                         computerModel.testConnectionForComputer(index)
                         testConnectionDialog.open()
                     }
+                }
+
+                NavigableMenuItem {
+                    text: qsTr("Streaming profile…")
+                    onTriggered: hostProfileDialog.edit(computerModel.profileForComputer(index))
                 }
 
                 NavigableMenuItem {
@@ -274,6 +391,18 @@ CenteredGridView {
             }
         }
 
+        // Keyboard alternative to the Display button; controller users can
+        // use the existing context menu to reach the same action.
+        Keys.onPressed: {
+            if (event.key === Qt.Key_D && model.online && model.paired) {
+                computerModel.chooseMonitorForComputer(index)
+                event.accepted = true
+            } else if (event.key === Qt.Key_P) {
+                hostProfileDialog.edit(computerModel.profileForComputer(index))
+                event.accepted = true
+            }
+        }
+
         Keys.onMenuPressed: {
             // We must use open() here so the menu is positioned on
             // the ItemDelegate and not where the mouse cursor is
@@ -351,6 +480,11 @@ CenteredGridView {
             // Stop showing the spinner and show the image instead
             showSpinner = false
         }
+    }
+
+    HostProfileDialog {
+        id: hostProfileDialog
+        profileModel: computerModel
     }
 
     NavigableDialog {

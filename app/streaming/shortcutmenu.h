@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -45,7 +46,7 @@ public:
 
     // Call regularly from the event loop; hides transient messages when they expire.
     void tick();
-    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
+    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_HostFilesLoading || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
 
     // Notifications normally use the shortcuts button's position. Bitrate
     // notifications can instead be anchored to the stream window.
@@ -64,6 +65,7 @@ private:
         PageCustom,
         PageClipboard,
         PageTyping,     // choose how pasted text is typed (reached from Vibelight controls)
+        PageHostFiles,
         PageCount
     };
 
@@ -74,6 +76,15 @@ private:
         KindOpenConfig, // open the custom shortcuts file in the default editor
         KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
+        KindPreviewBitrate, // display the user-chosen bitrate notification location
+        KindPreviewIdlePrompt, // test the idle response window
+        KindDownloadHostFile, // download newest file from host's shared folder
+        KindBrowseHostFiles,
+        KindRefreshHostFiles,
+        KindHostFileItem,
+        KindHostFilesNext,
+        KindHostFilesPrevious,
+        KindCancelTransfer,
         KindClipboard,  // type one of the recent local clipboard entries on the remote PC
         KindClipPush,   // copy this PC's clipboard text to the host's clipboard
         KindClipPull,   // copy the host's clipboard text to this PC's clipboard
@@ -171,6 +182,12 @@ private:
     bool m_TtfInitialized;
 
     std::vector<Item> m_Items;
+    QStringList m_HostFiles;
+    QString m_HostFileError;
+    bool m_HostFilesLoading = false;
+    int m_HostFilesPage = 0;
+    std::string m_LastTransferProgress;
+    unsigned int m_NextTransferRefresh = 0;
     std::vector<std::string> m_ColumnTitles;           // titles of the current page's columns
     std::vector<std::string> m_PageTitles[PageCount];  // column titles for every page
     int m_Page = 0;

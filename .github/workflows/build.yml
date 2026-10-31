@@ -42,6 +42,22 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -I app tests/logic_tests.cpp -o logic_tests
           ./logic_tests
 
+  host-profile-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Qt Core test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript pkg-config
+      - name: Exercise host profile isolation and persistence
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fPIC -I app tests/host_profile_tests.cpp $(pkg-config --cflags --libs Qt6Core) -o host_profile_tests
+          ./host_profile_tests
+      - name: Exercise profile editor save and cancel
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+
   # Runs the one-click updater script against throwaway folders on Windows.
   updater-tests:
     runs-on: windows-latest

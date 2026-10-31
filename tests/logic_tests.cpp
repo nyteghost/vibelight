@@ -2,6 +2,7 @@
 //   g++ -std=c++17 -Wall -Wextra -I app tests/logic_tests.cpp -o logic_tests && ./logic_tests
 
 #include "streaming/vibelight_logic.h"
+#include "settings/hostprofile.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,38 @@ static void expectKey(char c, unsigned short vk, bool shift)
                     (c >= 32 && c < 127) ? c : '?', (unsigned char)c, ok, gotVk, gotShift, vk, shift);
         g_failures++;
     }
+}
+
+static void testIdleSessionGuard()
+{
+    using vibelight::IdleSessionGuard;
+    CHECK(IdleSessionGuard::idleTimeoutMs == 30u * 60u * 1000u);
+    CHECK(IdleSessionGuard::responseTimeoutMs == 2u * 60u * 1000u);
+    const std::uint32_t start = 1000;
+    IdleSessionGuard guard(start);
+    CHECK(!guard.needsPrompt(start));
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs - 1));
+    guard.noteInput(start + 10000);
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t deadline = start + 10000 + IdleSessionGuard::idleTimeoutMs;
+    CHECK(guard.needsPrompt(deadline));
+    guard.promptOpened(deadline);
+    CHECK(!guard.needsPrompt(deadline));
+    CHECK(guard.responseSecondsLeft(deadline) == 120u);
+    guard.noteInput(deadline + 5000);
+    CHECK(!guard.promptExpired(deadline + 119999));
+    CHECK(guard.responseSecondsLeft(deadline + 119999) == 1u);
+    CHECK(guard.promptExpired(deadline + 120000));
+    guard.confirmed(deadline + 120000);
+    CHECK(!guard.needsPrompt(deadline + 120000));
+    CHECK(guard.needsPrompt(deadline + 120000 + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t nearWrap = 0xfffffff0u;
+    IdleSessionGuard wrap(nearWrap);
+    CHECK(!wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs - 1u));
+    CHECK(wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs));
+    wrap.promptOpened(nearWrap + IdleSessionGuard::idleTimeoutMs);
+    CHECK(wrap.promptExpired(nearWrap + IdleSessionGuard::idleTimeoutMs +
+                             IdleSessionGuard::responseTimeoutMs));
 }
 
 static void testKeys()
@@ -288,9 +321,25 @@ static void testHotkey()
     CHECK(offered + (int)std::string(taken).size() == 26);
 }
 
+static void testHostProfileBounds()
+{
+    using vibelight::HostProfile;
+    CHECK(HostProfile().valid());
+    CHECK((HostProfile{256, 8192, 10, 500, false}.valid()));
+    CHECK((HostProfile{8192, 256, 9999, 150000, true}.valid()));
+    CHECK(!(HostProfile{255, 1080, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 8193, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 0, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 10000, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 499, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 150001, false}.valid()));
+}
+
 int main()
 {
+    testHostProfileBounds();
     testKeys();
+    testIdleSessionGuard();
     testBitrate();
     testAutoBitrate();
     testAutoBitrateAcknowledgment();

@@ -125,3 +125,24 @@ new commits require their own result before recommending a download.
 
 Host installation, UI and tray testing: see the companion repository's
 [CachyOS beta guide](https://github.com/nyteghost/vibebeam/blob/beta/host-download-20261028/docs/BETA_CACHYOS_TESTING.md).
+
+## Next priorities and candidate additions
+
+The reconnect controls at `2297e96b6ae1` passed
+[Windows build](https://github.com/nyteghost/vibelight/actions/runs/41222258530).
+Keyboard/controller and real-stream teardown testing remain required.
+
+1. Connection doctor: explain host/client compatibility, network and decoder
+   failures from observed evidence; keep unknown metrics visibly unknown.
+2. Per-host profiles: remember quality, notification position and monitor choices;
+   preview settings and preserve advanced/manual overrides.
+3. Session review: show FPS/bitrate trends, reconnect events and cleanup outcomes,
+   with an explicitly copied redacted support summary and no automatic upload.
+4. Monitor preview: distinguish physical and virtual outputs, retain last-known
+   choices, and verify ownership before any virtual-display cleanup.
+5. Update center: distinguish installed and running versions from beta artifacts;
+   verify provenance and rollback availability before offering a planned update.
+
+These extend the existing phases. The host's read-only FPS guidance does not
+supply client RTT, delivered FPS or packet loss. A client telemetry contract,
+capability validation and tested setting transactions must precede Apply/Undo.

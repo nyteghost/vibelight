@@ -47,7 +47,8 @@ delete an invalid entry automatically.
 Qt-free tests cover numeric limits. A Qt Core test uses temporary INI files to
 verify identity isolation, persistence, invalid/future data handling, reset,
 monitor/global preservation and write failure. No test writes real client or
-host settings.
+host settings. Qt Quick tests exercise Save/Cancel, typed values, bad input,
+storage failure and a short/narrow dialog window.
 
 Before promoting this feature, manually test two hosts with different profiles,
 restart the client, rename a host, Cancel an edited draft, disable/reset one

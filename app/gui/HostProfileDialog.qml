@@ -30,8 +30,12 @@ NavigableDialog {
     }
 
     function editedValue(control) {
-        var number = control.valueFromText(control.contentItem.text, control.locale)
-        return isFinite(number) && Math.floor(number) === number && number >= control.from && number <= control.to ? number : -1
+        try {
+            var number = control.valueFromText(control.contentItem.text, control.locale)
+            return isFinite(number) && Math.floor(number) === number && number >= control.from && number <= control.to ? number : -1
+        } catch (error) {
+            return -1
+        }
     }
 
     function saveProfile() {
@@ -68,7 +72,7 @@ NavigableDialog {
                 Label { text: qsTr("Height (pixels)") }
                 SpinBox { id: videoHeight; from: 256; to: 8192; stepSize: 2; editable: true; Layout.fillWidth: true; Accessible.name: qsTr("Profile height") }
                 Label { text: qsTr("Frame rate (FPS)") }
-                SpinBox { id: frameRate; from: 10; to: 9999; editable: true; Layout.fillWidth: true; Accessible.name: qsTr("Profile frame rate") }
+                SpinBox { id: frameRate; objectName: "profileFrameRate"; from: 10; to: 9999; editable: true; Layout.fillWidth: true; Accessible.name: qsTr("Profile frame rate") }
                 Label { text: qsTr("Bitrate ceiling (kbps)") }
                 SpinBox { id: bitrate; from: 500; to: 150000; stepSize: 500; editable: true; Layout.fillWidth: true; Accessible.name: qsTr("Profile bitrate ceiling") }
             }

@@ -4,6 +4,29 @@ Vibelight is a fork of [Moonlight PC](https://github.com/moonlight-stream/moonli
 
 > **This is an unofficial fork.** It is not affiliated with or endorsed by the Moonlight project. Please don't report problems with this fork to the upstream project. Upstream is licensed under GPLv3, and so is this fork (see [LICENSE](LICENSE)).
 
+## Vibelight TV — NVIDIA Shield TV Pro beta
+
+The Android TV client lives in [`android-tv/`](android-tv/README.md), independently
+of the Windows/Qt application. It has a native dark TV dashboard, paired game tiles,
+local discovery/manual IP, streaming profiles and the pinned Moonlight Android
+MediaCodec/audio/input foundation. The starting target is **4K60 HEVC at 50 Mbps**
+on wired Ethernet, with H.264 fallback and conditional opt-in HDR10.
+
+- **Download:** [Android TV beta APK workflow](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml).
+  Use a successful beta run's **Vibelight-TV-arm64-v8a-beta-N** artifact for Shield.
+- **Install, pair, update and troubleshoot:** [Shield TV guide](android-tv/docs/SHIELD_GUIDE.md).
+- **Architecture and compatibility:** [Android TV ADR](android-tv/docs/ARCHITECTURE.md).
+- **What is finished / still open:** [TV roadmap](android-tv/docs/ROADMAP.md),
+  [changelog](android-tv/CHANGELOG.md), [Obsidian note](android-tv/docs/OBSIDIAN.md).
+
+This is an unofficial GPLv3 Moonlight Android derivative with its own beta package
+identity. It coexists with Moonlight and does not replace the installed Vibebeam
+host. Physical Shield 4K60/HDR/input/audio/cleanup tests remain required; CI and
+emulator results do not prove streaming performance. PyroWave, live automatic
+bitrate changes, automatic health rollback and automatic reconnect are not included.
+Debug-signed beta updates require a matching signing certificate; see the guide.
+All TV development stays on `beta/next-features-20261028` until explicitly approved.
+
 ## Quick start
 1. Download the latest build (see [Downloads](#downloads)) and unzip it. Add an empty file named `portable.dat` next to `Vibelight.exe` if you want settings kept in that folder.
 2. Pair with your host the same way as in Moonlight and start a stream.
@@ -51,7 +74,7 @@ While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Al
 - This feature is new and has had limited testing, especially in exclusive fullscreen.
 
 ### Auto-reconnect
-If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 3 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
+If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 5 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
 
 ### Custom shortcuts
 Click **Edit custom shortcuts...** in the dropdown (or edit the file yourself) to add your own buttons. The file is `vibelight-shortcuts.json`. It lives in the app's config folder, or next to `Vibelight.exe` in portable mode. It is created the first time you open the menu. Changes show up the next time you press Ctrl+Alt+Shift+H, with no restart.

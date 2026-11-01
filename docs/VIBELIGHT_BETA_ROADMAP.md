@@ -204,3 +204,17 @@ interfaces at desktop and narrow sizes. The full-page preview preserves every
 preference property across category changes and search. Original settings/control
 IDs and preference-write expressions were checked before and after regrouping.
 Live streaming, actual display hardware and controller checks remain manual gates.
+
+## Vibelight TV — dedicated Shield client
+
+A separate Android-native integration now lives in `android-tv/` on this beta
+branch. See the [TV roadmap](../android-tv/docs/ROADMAP.md),
+[architecture](../android-tv/docs/ARCHITECTURE.md) and
+[Shield installation/testing guide](../android-tv/docs/SHIELD_GUIDE.md).
+Desktop streaming and QML remain independent. The TV integration reuses pinned
+Moonlight Android pairing/transport/MediaCodec/audio/input paths and adds a
+Vibelight TV dashboard and explicit next-stream profiles/guidance.
+
+The Android workflow must pass on the exact head before its APK is recommended.
+Hardware streaming, HDR, controllers, latency and cleanup remain physical-device
+gates. This does not finish the desktop display manager, toolbar or transfer center.

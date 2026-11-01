@@ -17,8 +17,11 @@ def focus_and_activate(text):
         if focused is not None and focused.get('text')==text:
             adb('shell','input','keyevent','23');time.sleep(.5);return
         adb('shell','input','keyevent','20');time.sleep(.1)
+    screenshot('focus-failure')
+    (out/'focus-failure.xml').write_text(ET.tostring(dump(),encoding='unicode'))
     raise AssertionError('D-pad could not reach '+text)
 try:
+    adb('shell','wm','size','1920x1080');adb('shell','wm','density','320')
     adb('install','-r',str(apk));adb('logcat','-c')
     result=adb('shell','am','start','-W','-n',pkg+'/com.limelight.tv.TvHomeActivity')
     assert 'Error' not in result,result

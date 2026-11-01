@@ -15,6 +15,8 @@ metadata=json.loads((root/'vibelight-build.json').read_text())
 assert metadata['applicationId']=='io.github.nyteghost.vibelight.tv.beta'
 assert metadata['abi'] in ['arm64-v8a','x86']
 assert metadata['versionCode']>0
+assert metadata['sourceRevision']
+assert 'VIBELIGHT_TV_TEST_KEYSTORE' in (root/'app/build.gradle').read_text()
 assert 'private static boolean verbose = false;' in (root/'app/src/main/java/com/limelight/nvstream/http/NvHTTP.java').read_text()
 assert (root/'app/src/main/jni/moonlight-core/moonlight-common-c/enet/include/enet/enet.h').is_file()
 assert (root/'app/src/main/res/drawable/vibelight_tv_banner.png').read_bytes().startswith(b'\x89PNG')

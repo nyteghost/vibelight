@@ -33,6 +33,15 @@ def prepare(upstream, output, number):
     sha = os.environ.get('GITHUB_SHA', 'local')[:8]
     version = f'0.1.0-beta.{number}+{sha}'
     gradle = output / 'app/build.gradle'
+    replace_once(gradle, 'android {', '''android {
+    signingConfigs {
+        debug {
+            storeFile file(System.getenv("VIBELIGHT_TV_TEST_KEYSTORE") ?: "${System.properties['user.home']}/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }''')
     replace_once(gradle, 'minSdk 16', 'minSdk 26')
     replace_once(gradle, 'versionName "12.1"', f'versionName "{version}"')
     replace_once(gradle, 'versionCode = 314', f'versionCode = {number}')
@@ -91,7 +100,7 @@ def prepare(upstream, output, number):
     application.set(f'{{{ns}}}banner','@drawable/vibelight_tv_banner')
     application.set(f'{{{ns}}}icon','@drawable/vibelight_tv_banner')
     tree.write(manifest,encoding='utf-8',xml_declaration=True)
-    (output/'vibelight-build.json').write_text(json.dumps({'version':version,'versionCode':number,'applicationId':'io.github.nyteghost.vibelight.tv.beta','abi':abi,'upstream':LOCK},indent=2)+'\n')
+    (output/'vibelight-build.json').write_text(json.dumps({'sourceRevision':os.environ.get('GITHUB_SHA','local'),'version':version,'versionCode':number,'applicationId':'io.github.nyteghost.vibelight.tv.beta','abi':abi,'upstream':LOCK},indent=2)+'\n')
     print(f'Prepared {version} ({abi}) in {output}')
 
 if __name__ == '__main__':

@@ -38,6 +38,7 @@ public final class TvHomeActivity extends Activity {
     private LinearLayout content, shell;
     private String page = "Home", signature = "";
     private TextView serviceStatus;
+    private Button homeNavigation;
     private ComputerDetails libraryHost;
     private final ServiceConnection service = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder value) {
@@ -63,15 +64,23 @@ public final class TvHomeActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         shell = new LinearLayout(this); shell.setBackgroundColor(BG); setContentView(shell);
         LinearLayout rail = new LinearLayout(this); rail.setOrientation(LinearLayout.VERTICAL); rail.setPadding(dp(20),dp(28),dp(16),dp(20));
-        rail.setBackgroundColor(PANEL); shell.addView(rail,new LinearLayout.LayoutParams(dp(190),-1));
+        rail.setBackgroundColor(PANEL);
+        ScrollView railScroll=new ScrollView(this);railScroll.setFillViewport(true);railScroll.addView(rail);shell.addView(railScroll,new LinearLayout.LayoutParams(dp(190),-1));
         rail.addView(label("Vibelight TV",24,TEXT,true)); rail.addView(label("SHIELD · BETA",12,ACCENT,true));
+        Button previousNavigation=null;
         for (String name : new String[]{"Home","Recent","Profiles","Performance","Controllers","Diagnostics","Settings","About"}) {
             Button button = action(name, () -> show(name));
+            button.setId(View.generateViewId());
+            if(homeNavigation==null) {homeNavigation=button;button.setNextFocusUpId(button.getId());}
+            if(previousNavigation!=null) {previousNavigation.setNextFocusDownId(button.getId());button.setNextFocusUpId(previousNavigation.getId());}
+            previousNavigation=button;
             rail.addView(button,new LinearLayout.LayoutParams(-1,dp(48)));
         }
+        previousNavigation.setNextFocusDownId(previousNavigation.getId());
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); shell.addView(scroll,new LinearLayout.LayoutParams(0,-1,1));
         content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(32),dp(28),dp(32),dp(28)); scroll.addView(content);
         show("Home");
+        homeNavigation.requestFocus();
         bound = bindService(new Intent(this,ComputerManagerService.class),service,BIND_AUTO_CREATE);
         if (!bound) serviceStatus.setText("Host service unavailable. Reopen Vibelight TV to retry.");
     }
@@ -123,8 +132,8 @@ public final class TvHomeActivity extends Activity {
         background.addState(new int[]{},shape(PANEL,Color.rgb(38,51,77)));b.setBackground(background);
         b.setOnClickListener(v->run.run());return b;
     }
-    private void button(String text,Runnable run) {
-        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(6),0,dp(6));content.addView(action(text,run),lp);
+    private Button button(String text,Runnable run) {
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(6),0,dp(6));Button b=action(text,run);content.addView(b,lp);return b;
     }
     private void note(String text) { content.addView(label(text,16,MUTED,false)); }
     private void heading(String text) { content.addView(label(text,24,TEXT,true)); }
@@ -156,7 +165,7 @@ public final class TvHomeActivity extends Activity {
             if(recent && !TvPreferences.prefs(this).contains("vibe_recent_"+h.uuid))continue;
             shown++;
             String state=h.state==ComputerDetails.State.ONLINE?"Online":h.state==ComputerDetails.State.OFFLINE?"Offline":"Checking";
-            button(h.name+"\n"+state+" · "+(h.pairState==PairingManager.PairState.PAIRED?"Paired":"Pairing required"),()->openHost(h));
+            button(h.name+"\n"+state+" · "+(h.pairState==PairingManager.PairState.PAIRED?"Paired":"Pairing required"),()->openHost(h)).setTag("host:"+h.uuid);
         }
         if(shown==0) note(recent?"No recent launches yet.":"Searching your local network. If discovery finds nothing, add your PC's LAN IP. Pairing stays local to this app.");
         note("Select a paired PC to open its game tiles. Back returns here. Profiles apply only to the next new stream.");
@@ -228,7 +237,7 @@ public final class TvHomeActivity extends Activity {
         note("Automatic in-stream bitrate changes and health-triggered rollback are future work. This beta uses explicit next-stream adjustments only.");
     }
     private void controllers() {
-        heading("Controllers & remote");note("D-pad / left stick: move focus. A / Cross / Select: open. Back / B / Circle: return. Hold Back during a stream for the core's disconnect flow. Keyboard: Ctrl+Alt+Shift+Q disconnects. Verify these on your controller before a long session.");
+        heading("Controllers & remote");note("D-pad / left stick: move focus. A / Cross / Select: open. Back / B / Circle: return. Use Back during a stream for the core's disconnect flow. Keyboard: Ctrl+Alt+Shift+Q disconnects. Verify these on your controller before a long session.");
         note("Pair Xbox/PlayStation controllers in Shield Settings → Remotes & Accessories, or use USB. Basic controller input is inherited; rumble, touchpad and motion support vary by controller and Android firmware.");
         for(int id:InputDevice.getDeviceIds()) {InputDevice d=InputDevice.getDevice(id);if(d!=null&&(d.getSources()&InputDevice.SOURCE_GAMEPAD)==InputDevice.SOURCE_GAMEPAD)note("Detected: "+d.getName());}
         button("Advanced controller & keyboard settings",()->startActivity(new Intent(this,StreamSettings.class)));

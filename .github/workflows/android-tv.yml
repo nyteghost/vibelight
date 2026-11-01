@@ -20,6 +20,7 @@ jobs:
         abi: [arm64-v8a, x86]
     env:
       VIBELIGHT_TV_ABI: ${{ matrix.abi }}
+      VIBELIGHT_TV_TEST_KEYSTORE: ${{ runner.temp }}/vibelight-tv-signing/debug.keystore
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Select Java 17
@@ -51,8 +52,14 @@ jobs:
       - name: Restore beta test signing identity
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
+          path: ${{ env.VIBELIGHT_TV_TEST_KEYSTORE }}
           key: vibelight-tv-beta-debug-key-v1-${{ matrix.abi }}
+      - name: Ensure explicit beta test signing key
+        run: |
+          mkdir -p "$(dirname "$VIBELIGHT_TV_TEST_KEYSTORE")"
+          if [ ! -f "$VIBELIGHT_TV_TEST_KEYSTORE" ]; then
+            keytool -genkeypair -keystore "$VIBELIGHT_TV_TEST_KEYSTORE" -storetype JKS -storepass android -keypass android -alias androiddebugkey -dname 'CN=Vibelight TV Beta Test' -keyalg RSA -keysize 2048 -validity 10000
+          fi
       - name: Compile and lint Android APK
         working-directory: ${{ runner.temp }}/vibelight-tv
         run: |
@@ -89,6 +96,7 @@ jobs:
         with:
           api-level: 30
           target: android-tv
+          profile: tv_1080p
           arch: x86
           disable-animations: true
           script: python3 android-tv/tests/emulator_smoke.py "${{ runner.temp }}/tv-output/Vibelight-TV-x86-beta.apk" "${{ runner.temp }}/tv-smoke"

@@ -16,7 +16,6 @@ import android.view.*;
 import android.widget.*;
 import com.limelight.AppView;
 import com.limelight.BuildConfig;
-import com.limelight.PcView;
 import com.limelight.binding.PlatformBinding;
 import com.limelight.computers.ComputerManagerService;
 import com.limelight.nvstream.http.*;
@@ -40,6 +39,8 @@ public final class TvHomeActivity extends Activity {
     private TextView serviceStatus;
     private Button homeNavigation;
     private ComputerDetails libraryHost;
+    private static final int PAIR_REQUEST = 41;
+    private String pendingHostFocus;
     private final ServiceConnection service = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder value) {
             final ComputerManagerService.ComputerManagerBinder connected = (ComputerManagerService.ComputerManagerBinder)value;
@@ -84,7 +85,7 @@ public final class TvHomeActivity extends Activity {
         bound = bindService(new Intent(this,ComputerManagerService.class),service,BIND_AUTO_CREATE);
         if (!bound) serviceStatus.setText("Host service unavailable. Reopen Vibelight TV to retry.");
     }
-    @Override protected void onResume() { super.onResume(); foreground = true; startPolling(); if (!page.equals("Library")) show(page); }
+    @Override protected void onResume() { super.onResume(); foreground = true; hosts.clear(); signature=""; startPolling(); if (!page.equals("Library")) show(page); }
     @Override protected void onPause() {
         foreground = false; generation++;
         if (binder != null && polling) { binder.stopPolling(); polling = false; }
@@ -109,6 +110,17 @@ public final class TvHomeActivity extends Activity {
                 }
             });
         });
+    }
+    void openPairingManager() {
+        startActivityForResult(new Intent(this,TvPairingActivity.class),PAIR_REQUEST);
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data) {
+        super.onActivityResult(request,result,data);
+        if(request==PAIR_REQUEST) {
+            pendingHostFocus=result==RESULT_OK && data!=null?data.getStringExtra(TvPairingActivity.HOST_UUID):null;
+            show("Home");
+            homeNavigation.requestFocus();
+        }
     }
     private String hostsSignature() {
         StringBuilder s = new StringBuilder();
@@ -151,13 +163,17 @@ public final class TvHomeActivity extends Activity {
             case "Settings": settings(); break;
             case "About": about(); break;
         }
+        if(pendingHostFocus!=null && page.equals("Home")) {
+            View paired=shell.findViewWithTag("host:"+pendingHostFocus);
+            if(paired!=null) {paired.requestFocus();pendingHostFocus=null;return;}
+        }
         if(focused!=null) { View restore=shell.findViewWithTag(focused);if(restore!=null)restore.requestFocus(); }
     }
     private void home(boolean recent) {
         heading(recent?"Recent launches":"Play on the big screen");
         note("Your PCs, games and desktop. Wired 4K60 is the starting target; actual performance depends on the full streaming path.");
         button("Add PC by IP address",()->startActivity(new Intent(this,AddComputerManually.class)));
-        button("Pair & manage PCs",()->startActivity(new Intent(this,PcView.class)));
+        button("Pair & manage PCs",()->openPairingManager());
         ArrayList<ComputerDetails> list=new ArrayList<>(hosts.values());
         list.sort((a,b)->Long.compare(TvPreferences.prefs(this).getLong("vibe_recent_"+b.uuid,0),TvPreferences.prefs(this).getLong("vibe_recent_"+a.uuid,0)));
         int shown=0;
@@ -195,7 +211,7 @@ public final class TvHomeActivity extends Activity {
                     button("Back to PCs",()->show("Home"));
                     if(grid.getChildCount()>0)grid.getChildAt(0).requestFocus();
                 });
-            } catch(Exception error) { runOnUiThread(()->{if(!foreground||request!=generation)return;content.removeAllViews();heading("Could not load applications");note("Check the host, pairing permissions and LAN connection. Host 2FA extensions are not implemented in this Android core.");button("Try again",()->openHost(h));button("Pair & manage PCs",()->startActivity(new Intent(this,PcView.class)));button("Back to PCs",()->show("Home"));}); }
+            } catch(Exception error) { runOnUiThread(()->{if(!foreground||request!=generation)return;content.removeAllViews();heading("Could not load applications");note("Check the host, pairing permissions and LAN connection. Host 2FA extensions are not implemented in this Android core.");button("Try again",()->openHost(h));button("Pair & manage PCs",()->openPairingManager());button("Back to PCs",()->show("Home"));}); }
         });
     }
     private void openFullLibrary(ComputerDetails h) {
@@ -262,7 +278,7 @@ public final class TvHomeActivity extends Activity {
         note("These are advertised capabilities, not a playback test. PyroWave is unavailable. No synthetic latency values or background network probes are shown.");
         button("Refresh local checks",()->show("Diagnostics"));
     }
-    private void settings() {heading("Settings");button("Streaming profiles",()->show("Profiles"));button("Advanced streaming, audio & input",()->startActivity(new Intent(this,StreamSettings.class)));button("Pair & manage PCs",()->startActivity(new Intent(this,PcView.class)));note("Updates are downloaded as beta APKs from this repository's Android TV Actions run. Install over the existing app only when the signing certificate matches. No automatic downloads or host changes.");}
+    private void settings() {heading("Settings");button("Streaming profiles",()->show("Profiles"));button("Advanced streaming, audio & input",()->startActivity(new Intent(this,StreamSettings.class)));button("Pair & manage PCs",()->openPairingManager());note("Updates are downloaded as beta APKs from this repository's Android TV Actions run. Install over the existing app only when the signing certificate matches. No automatic downloads or host changes.");}
     private void about() {heading("Vibelight TV Beta");note("Independent Android TV client for NVIDIA Shield TV Pro. Application ID: "+BuildConfig.APPLICATION_ID+"\nBuild: "+BuildConfig.VERSION_NAME);note("Unofficial GPLv3 Moonlight Android derivative. Protocol, pairing, MediaCodec, audio and input foundation: Moonlight Android v12.1, commit 1b1b100e63e8. Not affiliated with Moonlight or NVIDIA.");note("Source, notices and Shield guide: github.com/nyteghost/vibelight → beta/next-features-20261028 → android-tv. Windows and Vibebeam host installations are independent.");note("Physical Shield playback, 4K60/HDR, controllers, reconnect/cleanup and latency comparison remain manual release gates. No performance improvement over Moonlight is claimed.");}
     @Override public void onBackPressed() {if(!page.equals("Home"))show("Home");else super.onBackPressed();}
 }

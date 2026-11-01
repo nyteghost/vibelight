@@ -63,3 +63,12 @@ Completed integration is not equivalent to verified hardware support. CI cannot
 prove Shield decoding, end-to-end HDR, controller latency, audio sync or host display
 cleanup. Check the Actions run for the exact source revision; never infer success
 from workflow files or an artifact that uploaded before a later test failed.
+
+## Shield feedback: pairing navigation
+
+The owner reports installation/launch and pairing on Shield in beta 10301. The
+inherited PC manager remained visible, making the UI appear to revert. The 0.1.1
+TV wrapper returns selections/success to the modern dashboard and adds an explicit
+return button. CI exercises the real navigation callback with a synthetic in-memory
+identity; it does not simulate or verify PIN authentication. Physical streaming and
+post-pair validation of the corrected APK remain open.

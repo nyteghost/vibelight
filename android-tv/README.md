@@ -52,6 +52,6 @@ java -cp /tmp/vibe-tv-tests PolicyTest
 ```
 
 CI additionally compiles both Shield arm64 and emulator x86 APKs, runs Android lint,
-checks packaging boundaries, and installs/launches the x86 APK on an Android TV
+checks packaging boundaries and post-pair navigation callbacks, and installs/launches the x86 APK on an Android TV
 emulator for D-pad/Back navigation. These checks do not verify Shield MediaCodec,
 a real Vibebeam pairing, audio/input transport, HDR or streaming performance.

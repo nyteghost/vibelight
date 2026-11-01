@@ -59,7 +59,9 @@ Disable Network debugging when finished; no router port forwarding is required.
 4. Select the PC in the pairing manager. A PIN appears on the television.
 5. On your PC open Vibebeam's existing web interface and approve the PIN under
    its pairing/clients controls. Each app installation has its own pairing identity.
-6. Return to Vibelight TV Home and select your now-paired PC. Choose a game tile
+6. After pairing, the PC manager closes and returns to Vibelight TV Home with
+   your paired PC selected. Choose the PC to open its game tiles. You can also
+   leave the manager using **Return to Vibelight TV** or Back. Choose a game tile
    or the host's configured Desktop entry. If no Desktop is offered, it must be
    configured on the host; this APK does not invent an application ID.
 
@@ -149,6 +151,7 @@ explicitly afterward; do not remove other clients.
 |---|---|
 | APK won't install | Extract ZIP; use arm64 APK; check Android version (minimum 8.0/API 26), free space and signature. Use a newer version code. |
 | No launcher tile | Confirm you installed the TV beta artifact, not the source archive or x86 test APK. |
+| Old PC-icon screen after pairing in beta 10301 | This is the temporary PC manager, not an app downgrade. Press Back to return to the TV dashboard. Beta 0.1.1 fixes the return flow; install over the existing beta to preserve pairing. |
 | PC not discovered | Same LAN/VLAN, host running, mDNS/firewall; use manual IP. No internet port forwarding. |
 | Pairing or app list fails | Approve the PIN, review per-client permissions/2FA, retain host certificates. |
 | Another application running | Use Full library & session controls to resume or explicitly quit it. No silent quit is performed. |

@@ -23,6 +23,10 @@ def focus_and_activate(text):
 try:
     adb('shell','wm','size','1920x1080');adb('shell','wm','density','320')
     adb('install','-r',str(apk));adb('logcat','-c')
+    navigation=adb('shell','am','instrument','-w',pkg+'/com.limelight.tv.TvNavigationProbe')
+    (out/'pairing-navigation.txt').write_text(navigation)
+    assert 'INSTRUMENTATION_CODE: -1' in navigation and 'Pairing navigation passed:' in navigation,navigation
+
     result=adb('shell','am','start','-W','-n',pkg+'/com.limelight.tv.TvHomeActivity')
     assert 'Error' not in result,result
     time.sleep(3)

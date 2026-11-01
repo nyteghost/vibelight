@@ -31,7 +31,7 @@ def prepare(upstream, output, number):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
     sha = os.environ.get('GITHUB_SHA', 'local')[:8]
-    version = f'0.1.0-beta.{number}+{sha}'
+    version = f'0.1.1-beta.{number}+{sha}'
     gradle = output / 'app/build.gradle'
     replace_once(gradle, 'android {', '''android {
     signingConfigs {
@@ -62,11 +62,22 @@ def prepare(upstream, output, number):
     pc = next(a for a in application.findall('activity') if a.get(f'{{{ns}}}name') == '.PcView')
     for intent in list(pc.findall('intent-filter')): pc.remove(intent)
     activity = ET.SubElement(application,'activity',{f'{{{ns}}}name':'.tv.TvHomeActivity', f'{{{ns}}}exported':'true', f'{{{ns}}}screenOrientation':'landscape'})
+    ET.SubElement(application,'activity',{f'{{{ns}}}name':'.tv.TvPairingActivity', f'{{{ns}}}exported':'false', f'{{{ns}}}screenOrientation':'landscape'})
     intent = ET.SubElement(activity,'intent-filter')
     ET.SubElement(intent,'action',{f'{{{ns}}}name':'android.intent.action.MAIN'})
     for category in ['android.intent.category.LAUNCHER','android.intent.category.LEANBACK_LAUNCHER']:
         ET.SubElement(intent,'category',{f'{{{ns}}}name':category})
     tree.write(manifest,encoding='utf-8',xml_declaration=True)
+    # Only the TV wrapper returns selections/success to its parent. Ordinary core PC UI is unchanged.
+    replace_once(output/'app/src/main/java/com/limelight/PcView.java',
+                 '        Intent i = new Intent(this, AppView.class);',
+                 '''        if (this instanceof com.limelight.tv.TvPairingActivity) {
+            ((com.limelight.tv.TvPairingActivity)this).returnToDashboard(computer.uuid);
+            return;
+        }
+        Intent i = new Intent(this, AppView.class);''')
+    # Debug-only navigation instrumentation; no simulated PIN/crypto or host networking.
+    shutil.copytree(ROOT/'test-support',output/'app/src/debug',dirs_exist_ok=True)
     # Keep the upstream stream surface/theme and input lifecycle intact.
     replace_once(output/'app/src/main/java/com/limelight/Game.java',
                  'super.onCreate(savedInstanceState);',

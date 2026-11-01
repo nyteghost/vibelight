@@ -34,8 +34,9 @@ matching complete Android source alongside each APK; no proprietary binary engin
 The launcher binds the existing discovery service only while foregrounded. It waits
 for service readiness off the UI thread, copies discovery snapshots, preserves
 focus when host state changes and rejects stale app-list callbacks. Paired app
-requests retain the server certificate; pairing is delegated to the existing PC
-manager. It never silently quits another running application. A fresh host state
+requests retain the server certificate; pairing is delegated to a TV wrapper around the existing PC
+manager. The wrapper returns success/selection to its parent dashboard via an
+activity result; ordinary upstream PC management remains unchanged. It never silently quits another running application. A fresh host state
 is checked before launching a stream.
 
 ## Hardware boundary

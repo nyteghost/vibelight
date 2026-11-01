@@ -10,6 +10,11 @@ assert any(x.get(a+'name')=='android.hardware.touchscreen' and x.get(a+'required
 assert any(x.get(a+'name')=='android.software.leanback' and x.get(a+'required')=='true' for x in manifest.findall('uses-feature'))
 assert app.find("activity[@a:name='.Game']",ns) is not None
 assert app.find("activity[@a:name='.PcView']",ns) is not None
+pairing=app.find("activity[@a:name='.tv.TvPairingActivity']",ns)
+assert pairing is not None and pairing.get(a+'exported')=='false'
+assert (root/'app/src/debug/java/com/limelight/tv/TvNavigationProbe.java').is_file()
+assert not (root/'app/src/main/java/com/limelight/tv/TvNavigationProbe.java').exists()
+assert 'returnToDashboard(computer.uuid)' in (root/'app/src/main/java/com/limelight/PcView.java').read_text()
 assert app.find("activity[@a:name='.preferences.AddComputerManually']",ns) is not None
 metadata=json.loads((root/'vibelight-build.json').read_text())
 assert metadata['applicationId']=='io.github.nyteghost.vibelight.tv.beta'

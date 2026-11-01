@@ -118,8 +118,9 @@ public final class TvHomeActivity extends Activity {
         super.onActivityResult(request,result,data);
         if(request==PAIR_REQUEST) {
             pendingHostFocus=result==RESULT_OK && data!=null?data.getStringExtra(TvPairingActivity.HOST_UUID):null;
+            hosts.clear(); signature="";
             show("Home");
-            homeNavigation.requestFocus();
+            if(pendingHostFocus==null)homeNavigation.requestFocus();
         }
     }
     private String hostsSignature() {

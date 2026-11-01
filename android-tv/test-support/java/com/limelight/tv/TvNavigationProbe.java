@@ -58,10 +58,13 @@ public final class TvNavigationProbe extends Instrumentation {
             // This proves UI routing only. No authentication success or physical host is simulated.
             Method selected=PcView.class.getDeclaredMethod("doAppList",ComputerDetails.class,boolean.class,boolean.class);selected.setAccessible(true);
             ComputerDetails host=new ComputerDetails();host.uuid="navigation-test-only";host.name="Navigation test";host.state=ComputerDetails.State.ONLINE;
+            Field hosts=TvHomeActivity.class.getDeclaredField("hosts");hosts.setAccessible(true);
+            Field pending=TvHomeActivity.class.getDeclaredField("pendingHostFocus");pending.setAccessible(true);
             for(boolean newlyPaired:new boolean[]{true,false}) {
                 final TvPairingActivity active=manager;
-                runOnMainSync(()->{try {selected.invoke(active,host,newlyPaired,false);}catch(Exception e){throw new AssertionError(e);}});
+                runOnMainSync(()->{try {((java.util.Map<String,ComputerDetails>)hosts.get(home)).put(host.uuid,host);selected.invoke(active,host,newlyPaired,false);}catch(Exception e){throw new AssertionError(e);}});
                 returned(home);
+                check(host.uuid.equals(pending.get(home)),"Stale cached host consumed post-pair focus before refresh");
                 manager=open(home);
             }
             sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);returned(home);

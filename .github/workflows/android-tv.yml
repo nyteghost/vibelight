@@ -20,7 +20,7 @@ jobs:
         abi: [arm64-v8a, x86]
     env:
       VIBELIGHT_TV_ABI: ${{ matrix.abi }}
-      VIBELIGHT_TV_TEST_KEYSTORE: ${{ runner.temp }}/vibelight-tv-signing/debug.keystore
+      VIBELIGHT_TV_TEST_KEYSTORE: /tmp/vibelight-tv-signing/debug.keystore
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Select Java 17

@@ -92,7 +92,7 @@ public final class TvUpdateClient {
         File d=new File(context.getCacheDir(),"tv-updates");if(!d.isDirectory()&&!d.mkdirs())throw new IOException("Cannot create the update cache.");return d;
     }
     public File download(Context context,Candidate candidate,Progress progress) throws Exception {
-        File dir=directory(context);File partial=File.createTempFile("download-",".part",dir);File complete=new File(dir,"beta-"+candidate.versionCode+".apk");
+        File dir=directory(context);File partial=File.createTempFile("download-",".apk",dir);File complete=new File(dir,"beta-"+candidate.versionCode+".apk");
         HttpURLConnection c=null;
         try {
             c=connect(TvUpdatePolicy.assetUrl(candidate.tag,TvUpdatePolicy.APK));

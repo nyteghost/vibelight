@@ -91,8 +91,10 @@ public final class TvUpdateActivity extends Activity {
     }
     static Intent installerIntent(Context context,File file) {
         Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".tv-updates",file);
-        return new Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri).setClipData(ClipData.newRawUri("Vibelight TV beta",uri))
+        Intent intent=new Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(Intent.EXTRA_RETURN_RESULT,true);
+        intent.setClipData(ClipData.newRawUri("Vibelight TV beta",uri));
+        return intent;
     }
     private void installDownloaded() {
         if(candidate==null||downloaded==null)return;

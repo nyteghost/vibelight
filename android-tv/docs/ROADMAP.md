@@ -56,7 +56,8 @@ Updated: 2026-11-01. Branch: beta/next-features-20261028. Production Vibebeam un
 - [x] Main README integration, Shield installation/pairing/controller/settings/troubleshooting guide.
 - [x] ADR, roadmap, changelog, Obsidian-ready note and open-source provenance.
 - [ ] Private durable release-signing identity; debug cache is only an interim test mechanism.
-- [ ] Verified update center and signature/provenance verification before in-app installs.
+- [x] Manual beta update center with signature/provenance/hash checks and Android-confirmed installation.
+- [ ] Physical Shield update/download/permission/pairing-preservation acceptance.
 - [ ] Main promotion only after explicit owner approval and physical release gates.
 
 Completed integration is not equivalent to verified hardware support. CI cannot

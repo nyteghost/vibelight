@@ -1,5 +1,17 @@
 # Vibelight TV changelog
 
+## 0.2.0 beta — 2026-11-01
+
+- Add Updates in the TV sidebar and Settings: manual check, download/progress/cancel,
+  private verified cache, install-source permission and Android confirmation.
+- Verify source/channel, package/version/ABI, length/SHA256 and installed signing
+  certificate; refuse changed signers, invalid downloads and same/older versions.
+- Block installation during an active streaming activity; preserve app identity/data.
+- Publish tested immutable TV beta prereleases with a public updater manifest,
+  direct APK, matching source, checksums and certificate after CI gates pass.
+- Add updater policy/release tests and emulator archive/provider/installer checks.
+- One manual install is needed to enable this updater for future beta versions.
+
 ## 0.1.1 beta — 2026-11-01
 
 - Return successful TV pairing and paired-host selections to the TV dashboard,

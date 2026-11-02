@@ -27,6 +27,11 @@ try:
     (out/'pairing-navigation.txt').write_text(navigation)
     assert 'INSTRUMENTATION_CODE: -1' in navigation and 'Pairing navigation passed:' in navigation,navigation
 
+    adb('shell','appops','set',pkg,'REQUEST_INSTALL_PACKAGES','allow')
+    updates=adb('shell','am','instrument','-w','-r',pkg+'/com.limelight.tv.TvUpdateProbe')
+    (out/'update-validation.txt').write_text(updates)
+    assert 'INSTRUMENTATION_CODE: -1' in updates and 'Update validation passed:' in updates,updates
+
     result=adb('shell','am','start','-W','-n',pkg+'/com.limelight.tv.TvHomeActivity')
     assert 'Error' not in result,result
     time.sleep(3)
@@ -40,6 +45,12 @@ try:
         screenshot(page.lower())
         adb('shell','input','keyevent','4');time.sleep(.3)
         assert 'Play on the big screen' in labels(dump()),'Back did not return to Home'
+    adb('shell','am','force-stop',pkg);adb('shell','am','start','-W','-n',pkg+'/com.limelight.tv.TvHomeActivity');time.sleep(1)
+    focus_and_activate('Updates')
+    assert 'Beta updates' in labels(dump()) and 'Check for beta updates' in labels(dump())
+    screenshot('updates')
+    adb('shell','input','keyevent','4');time.sleep(.3)
+    assert 'Play on the big screen' in labels(dump())
     logs=adb('logcat','-d');(out/'logcat.txt').write_text(logs)
     assert not re.search(r'FATAL EXCEPTION',logs),logs[-5000:]
     print('APK installed/launched; six TV pages reached by D-pad; Back navigation passed. No streaming hardware was tested.')

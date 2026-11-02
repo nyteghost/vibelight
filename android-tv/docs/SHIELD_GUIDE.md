@@ -5,18 +5,24 @@ Nothing here replaces your Windows Vibelight or CachyOS Vibebeam installation.
 
 ## Download the correct package
 
-1. Open https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml
-2. Select a successful **Vibelight TV Beta APK** run on `beta/next-features-20261028`.
-3. Under Artifacts download **Vibelight-TV-arm64-v8a-beta-N**. GitHub may require
-   signing in. Extract the ZIP on your computer.
-4. Install **Vibelight-TV-arm64-v8a-beta.apk**. Do not install the x86 emulator APK.
-   The package also includes INSTALL.md, SHA256SUMS, signing-certificate.txt,
-   apk-badging.txt, vibelight-build.json and matching-android-source.tar.gz.
-5. Check SHA256SUMS against the APK before installation. The About screen shows
-   the build version; compare it to vibelight-build.json.
+For Vibelight TV 0.2.0 and newer, use **Updates → Check for beta updates** in the app.
+The first installation of this updater-capable beta is a one-time manual update.
 
-Exact run and artifact links are reported after the build completes. An artifact
-from a failed run is not a validated build, even if its upload succeeded.
+For a direct APK without GitHub sign-in or ZIP extraction:
+
+1. Open https://github.com/nyteghost/vibelight/releases
+2. Select a **Vibelight TV Beta tv-beta-N** prerelease, then download
+   **Vibelight-TV-arm64-v8a-beta.apk** from its assets.
+3. Open it on Shield and choose **Update** over your existing TV beta. Keep the
+   app installed to preserve its pairing/settings. Source/checksums are attached.
+
+Actions artifacts remain an alternative: open
+https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml and choose a
+successful beta run's **Vibelight-TV-arm64-v8a-beta-N** ZIP, extract it, and install
+its arm64 APK. Never use the x86 emulator artifact for Shield.
+
+Only both-ABI build/lint and emulator-success runs publish TV prereleases. TV tags
+are separate from stable desktop releases. About shows the installed version.
 
 ## Option A: USB installation, no developer mode
 
@@ -129,26 +135,54 @@ the old bitrate unless you edited it in the meantime. Metrics are memory-only,
 reset between streams and expire after five minutes. Off clears observations.
 No live automatic adjustment, health-triggered rollback or Local AI is shipped.
 
-## Updating and removing
+## Updating inside Vibelight TV
 
-Download a newer successful arm64 build, compare its signing certificate to the
-installed beta, and use the installer or `adb install -r` again. Version codes
-increment automatically for new CI runs. This is a debug-signed testing build:
-CI caches its test key but cache eviction can change the certificate. If Android
-reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, stop rather than deleting data;
-check the fingerprints. An uninstall/reinstall loses this client's saved pairing
-and settings, so plan to pair again. Durable private release signing and in-app
-updating remain roadmap items. Never use `adb uninstall com.limelight`.
+Install the updater-capable 0.2.0 beta once using the direct APK or USB/ADB steps.
+Then future TV betas can be installed from the app:
+
+1. End your stream. Open **Updates** in the sidebar, or **Settings → Beta updates**.
+2. Choose **Check for beta updates**. No checks or downloads run automatically.
+3. Review the newer version and choose **Download beta update**, then confirm.
+   Progress is shown; Cancel aborts the request. Interrupted or corrupt files are
+   never offered to Android's installer.
+4. Choose **Install downloaded update**. The first time, use **Allow Vibelight TV
+   to install updates**, enable Vibelight TV Beta in Android's unknown-app sources
+   setting, return and choose Install again.
+5. Approve Android's installation prompt. Reopen Vibelight TV after installation.
+   The same package/signature keeps pairing and settings. A live stream blocks
+   installation; downloads/checks do not change host state.
+
+Downloads use public, tested `tv-beta-N` GitHub prereleases. No GitHub account/token
+is stored. The app verifies repository/channel, release/source match, version,
+Android requirement, arm64 package, expected length, SHA256 and the actual signing
+certificate against the installed app. It rechecks the APK immediately before
+opening Android's installer through a private scoped content URI. The installer
+also validates the APK and requires approval; silent installation is not provided.
+
+A verified download can be reopened after leaving the screen. Files are in app
+cache, so Android may reclaim them; download again if needed. Offline checks,
+GitHub rate limits, missing metadata and invalid downloads show a retryable error.
+If a signing certificate changes, the updater blocks installation and keeps the
+current app. This beta still uses a cached CI test key; durable private release
+signing is pending. Never uninstall just to bypass a blocked signer check without
+planning for this client's pairing/settings to be lost.
+
+Manual installation over the current app remains available via direct APK or
+`adb install -r`. Version codes increment on each new CI run. See About for the
+installed version; Android may cancel or reject an update without changing it.
+No Windows or Vibebeam update is triggered by this feature.
 
 To remove only this beta: Shield Apps → Vibelight TV Beta → Uninstall, or
-`adb uninstall io.github.nyteghost.vibelight.tv.beta`. This does not remove Moonlight,
-Windows Vibelight or Vibebeam. A stale host-side paired entry can be revoked
-explicitly afterward; do not remove other clients.
+`adb uninstall io.github.nyteghost.vibelight.tv.beta`. This leaves Moonlight,
+Windows Vibelight and Vibebeam installed. A stale paired-client entry can be
+explicitly revoked on the host afterward.
 
 ## Troubleshooting
 
 | Symptom | Check / recovery |
 |---|---|
+| In-app updater reports signer changed | Keep the current app. Compare the release signing fingerprint; do not automatically uninstall/re-pair to bypass it. |
+| Beta check fails | Check internet access to GitHub or retry after rate limiting. Local streaming continues independently; no background check is scheduled. |
 | APK won't install | Extract ZIP; use arm64 APK; check Android version (minimum 8.0/API 26), free space and signature. Use a newer version code. |
 | No launcher tile | Confirm you installed the TV beta artifact, not the source archive or x86 test APK. |
 | Old PC-icon screen after pairing in beta 10301 | This is the temporary PC manager, not an app downgrade. Press Back to return to the TV dashboard. Beta 0.1.1 fixes the return flow; install over the existing beta to preserve pairing. |
@@ -171,6 +205,7 @@ explicitly afterward; do not remove other clients.
 - [ ] Controller buttons/sticks/triggers, keyboard/mouse and HDMI audio synchronization.
 - [ ] Disconnect, explicit Quit, network loss, manual reconnect, app background/crash.
 - [ ] Confirm physical monitors survive; only host-owned virtual displays are cleaned up.
+- [ ] Updates: check, cancel/download, unknown-source permission, Android confirmation, in-place update and preserved pairing/settings.
 - [ ] Same settings/game scene in Moonlight; log FPS, decode time, losses and RTT.
 - [ ] High-speed-camera controller-to-screen comparison if practical; document
       camera frame rate, display mode, connection, codec, bitrate and repeated trials.

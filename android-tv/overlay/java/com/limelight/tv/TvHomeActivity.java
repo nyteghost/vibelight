@@ -69,8 +69,8 @@ public final class TvHomeActivity extends Activity {
         ScrollView railScroll=new ScrollView(this);railScroll.setFillViewport(true);railScroll.addView(rail);shell.addView(railScroll,new LinearLayout.LayoutParams(dp(190),-1));
         rail.addView(label("Vibelight TV",24,TEXT,true)); rail.addView(label("SHIELD · BETA",12,ACCENT,true));
         Button previousNavigation=null;
-        for (String name : new String[]{"Home","Recent","Profiles","Performance","Controllers","Diagnostics","Settings","About"}) {
-            Button button = action(name, () -> show(name));
+        for (String name : new String[]{"Home","Recent","Profiles","Performance","Controllers","Diagnostics","Settings","Updates","About"}) {
+            Button button = action(name, () -> {if(name.equals("Updates"))startActivity(new Intent(this,TvUpdateActivity.class));else show(name);});
             button.setId(View.generateViewId());
             if(homeNavigation==null) {homeNavigation=button;button.setNextFocusUpId(button.getId());}
             if(previousNavigation!=null) {previousNavigation.setNextFocusDownId(button.getId());button.setNextFocusUpId(previousNavigation.getId());}
@@ -279,7 +279,7 @@ public final class TvHomeActivity extends Activity {
         note("These are advertised capabilities, not a playback test. PyroWave is unavailable. No synthetic latency values or background network probes are shown.");
         button("Refresh local checks",()->show("Diagnostics"));
     }
-    private void settings() {heading("Settings");button("Streaming profiles",()->show("Profiles"));button("Advanced streaming, audio & input",()->startActivity(new Intent(this,StreamSettings.class)));button("Pair & manage PCs",()->openPairingManager());note("Updates are downloaded as beta APKs from this repository's Android TV Actions run. Install over the existing app only when the signing certificate matches. No automatic downloads or host changes.");}
+    private void settings() {heading("Settings");button("Beta updates",()->startActivity(new Intent(this,TvUpdateActivity.class)));button("Streaming profiles",()->show("Profiles"));button("Advanced streaming, audio & input",()->startActivity(new Intent(this,StreamSettings.class)));button("Pair & manage PCs",()->openPairingManager());note("Use Beta updates to check, download and verify a tested TV beta, then approve installation in Android. Checks happen only when requested.");}
     private void about() {heading("Vibelight TV Beta");note("Independent Android TV client for NVIDIA Shield TV Pro. Application ID: "+BuildConfig.APPLICATION_ID+"\nBuild: "+BuildConfig.VERSION_NAME);note("Unofficial GPLv3 Moonlight Android derivative. Protocol, pairing, MediaCodec, audio and input foundation: Moonlight Android v12.1, commit 1b1b100e63e8. Not affiliated with Moonlight or NVIDIA.");note("Source, notices and Shield guide: github.com/nyteghost/vibelight → beta/next-features-20261028 → android-tv. Windows and Vibebeam host installations are independent.");note("Physical Shield playback, 4K60/HDR, controllers, reconnect/cleanup and latency comparison remain manual release gates. No performance improvement over Moonlight is claimed.");}
     @Override public void onBackPressed() {if(!page.equals("Home"))show("Home");else super.onBackPressed();}
 }

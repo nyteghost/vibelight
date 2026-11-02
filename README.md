@@ -12,8 +12,11 @@ local discovery/manual IP, streaming profiles and the pinned Moonlight Android
 MediaCodec/audio/input foundation. The starting target is **4K60 HEVC at 50 Mbps**
 on wired Ethernet, with H.264 fallback and conditional opt-in HDR10.
 
-- **Download:** [Android TV beta APK workflow](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml).
-  Use a successful beta run's **Vibelight-TV-arm64-v8a-beta-N** artifact for Shield.
+- **Download:** [TV beta prereleases](https://github.com/nyteghost/vibelight/releases).
+  Choose a `Vibelight TV Beta tv-beta-N` release and its arm64 APK. From TV 0.2.0,
+  **Updates → Check for beta updates** downloads/verifies a newer beta and opens
+  Android's installation prompt. One manual update enables this feature.
+  [Actions ZIP artifacts](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml) remain available.
 - **Install, pair, update and troubleshoot:** [Shield TV guide](android-tv/docs/SHIELD_GUIDE.md).
 - **Architecture and compatibility:** [Android TV ADR](android-tv/docs/ARCHITECTURE.md).
 - **What is finished / still open:** [TV roadmap](android-tv/docs/ROADMAP.md),

@@ -32,6 +32,9 @@ jobs:
           mkdir -p /tmp/tv-policy
           javac -d /tmp/tv-policy android-tv/overlay/java/com/limelight/tv/TvPolicy.java android-tv/tests/PolicyTest.java
           java -cp /tmp/tv-policy PolicyTest
+          javac -d /tmp/tv-policy android-tv/overlay/java/com/limelight/tv/TvUpdatePolicy.java android-tv/overlay/java/com/limelight/tv/TvSessionState.java android-tv/tests/UpdatePolicyTest.java
+          java -cp /tmp/tv-policy UpdatePolicyTest
+          python3 android-tv/tests/test_release.py
           python3 -m py_compile android-tv/prepare.py android-tv/tests/test_prepare.py android-tv/tests/emulator_smoke.py
       - name: Fetch pinned Android protocol foundation
         run: |
@@ -109,3 +112,34 @@ jobs:
             ${{ runner.temp }}/tv-smoke/
             ${{ runner.temp }}/vibelight-tv/app/build/reports/lint-results-nonRootDebug.*
           if-no-files-found: ignore
+
+  publish-beta:
+    needs: apk
+    if: github.ref == 'refs/heads/beta/next-features-20261028'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Publish tested TV beta downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/beta/next-features-20261028" --jq '.object.sha')
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo 'A newer beta commit exists; skipping publication of this superseded build.'
+            exit 0
+          fi
+          destination="$RUNNER_TEMP/tv-publish"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "Vibelight-TV-arm64-v8a-beta-$GITHUB_RUN_NUMBER" --dir "$destination"
+          tag=$(python3 android-tv/make_release.py "$destination" "$GITHUB_SHA")
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease --latest=false --title "Vibelight TV Beta $tag" --notes-file "$destination/RELEASE_NOTES.md" \
+            "$destination/Vibelight-TV-arm64-v8a-beta.apk" "$destination/vibelight-tv-beta.json" \
+            "$destination/SHA256SUMS" "$destination/signing-certificate.txt" "$destination/vibelight-build.json" \
+            "$destination/matching-android-source.tar.gz" "$destination/INSTALL.md"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          echo "### TV beta download" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"

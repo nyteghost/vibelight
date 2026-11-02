@@ -21,6 +21,12 @@ assert metadata['applicationId']=='io.github.nyteghost.vibelight.tv.beta'
 assert metadata['abi'] in ['arm64-v8a','x86']
 assert metadata['versionCode']>0
 assert metadata['sourceRevision']
+assert any(x.get(a+'name')=='android.permission.REQUEST_INSTALL_PACKAGES' for x in manifest.findall('uses-permission'))
+provider=app.find("provider[@a:name='.tv.TvUpdateFileProvider']",ns)
+assert provider is not None and provider.get(a+'exported')=='false' and provider.get(a+'grantUriPermissions')=='true'
+paths=ET.parse(root/'app/src/main/res/xml/tv_update_paths.xml').getroot()
+assert len(paths)==1 and paths[0].tag=='cache-path' and paths[0].get('path')=='tv-updates/'
+assert app.find("activity[@a:name='.tv.TvUpdateActivity']",ns).get(a+'exported')=='false'
 assert 'VIBELIGHT_TV_TEST_KEYSTORE' in (root/'app/build.gradle').read_text()
 assert 'private static boolean verbose = false;' in (root/'app/src/main/java/com/limelight/nvstream/http/NvHTTP.java').read_text()
 assert (root/'app/src/main/jni/moonlight-core/moonlight-common-c/enet/include/enet/enet.h').is_file()

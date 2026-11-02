@@ -31,7 +31,7 @@ def prepare(upstream, output, number):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
     sha = os.environ.get('GITHUB_SHA', 'local')[:8]
-    version = f'0.1.1-beta.{number}+{sha}'
+    version = f'0.2.0-beta.{number}+{sha}'
     gradle = output / 'app/build.gradle'
     replace_once(gradle, 'android {', '''android {
     signingConfigs {
@@ -53,12 +53,18 @@ def prepare(upstream, output, number):
     if abi not in ('arm64-v8a', 'x86'):
         raise ValueError('Unexpected ABI')
     replace_once(gradle, 'minSdk 26', f'minSdk 26\n        ndk {{ abiFilters "{abi}" }}')
+    replace_once(gradle, 'dependencies {', "dependencies {\n    implementation 'androidx.core:core:1.12.0'")
+    with (output/'gradle.properties').open('a') as f:f.write('\nandroid.useAndroidX=true\n')
     manifest = output / 'app/src/main/AndroidManifest.xml'
     ns = 'http://schemas.android.com/apk/res/android'; ET.register_namespace('android', ns)
     tree = ET.parse(manifest); root = tree.getroot(); application = root.find('application')
     application.set(f'{{{ns}}}allowBackup', 'false')
     for feature in root.findall('uses-feature'):
         if feature.get(f'{{{ns}}}name') == 'android.software.leanback': feature.set(f'{{{ns}}}required','true')
+    ET.SubElement(root,'uses-permission',{f'{{{ns}}}name':'android.permission.REQUEST_INSTALL_PACKAGES'})
+    ET.SubElement(application,'activity',{f'{{{ns}}}name':'.tv.TvUpdateActivity',f'{{{ns}}}exported':'false',f'{{{ns}}}screenOrientation':'landscape'})
+    provider=ET.SubElement(application,'provider',{f'{{{ns}}}name':'.tv.TvUpdateFileProvider',f'{{{ns}}}authorities':'${applicationId}.tv-updates',f'{{{ns}}}exported':'false',f'{{{ns}}}grantUriPermissions':'true'})
+    ET.SubElement(provider,'meta-data',{f'{{{ns}}}name':'android.support.FILE_PROVIDER_PATHS',f'{{{ns}}}resource':'@xml/tv_update_paths'})
     pc = next(a for a in application.findall('activity') if a.get(f'{{{ns}}}name') == '.PcView')
     for intent in list(pc.findall('intent-filter')): pc.remove(intent)
     activity = ET.SubElement(application,'activity',{f'{{{ns}}}name':'.tv.TvHomeActivity', f'{{{ns}}}exported':'true', f'{{{ns}}}screenOrientation':'landscape'})
@@ -81,7 +87,8 @@ def prepare(upstream, output, number):
     # Keep the upstream stream surface/theme and input lifecycle intact.
     replace_once(output/'app/src/main/java/com/limelight/Game.java',
                  'super.onCreate(savedInstanceState);',
-                 'super.onCreate(savedInstanceState);\n        com.limelight.tv.TvTelemetry.reset();')
+                 'super.onCreate(savedInstanceState);\n        com.limelight.tv.TvTelemetry.reset();\n        com.limelight.tv.TvSessionState.enter();')
+    replace_once(output/'app/src/main/java/com/limelight/Game.java', 'super.onDestroy();', 'super.onDestroy();\n        com.limelight.tv.TvSessionState.leave();')
     replace_once(output/'app/src/main/java/com/limelight/nvstream/http/NvHTTP.java', 'private static boolean verbose = BuildConfig.DEBUG;', 'private static boolean verbose = false;')
     decoder = output/'app/src/main/java/com/limelight/binding/video/MediaCodecDecoderRenderer.java'
     replace_once(decoder, 'long rttInfo = MoonBridge.getEstimatedRttInfo();',

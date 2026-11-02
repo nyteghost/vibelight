@@ -48,3 +48,12 @@ settings; no lower-latency or better-picture claim without measurements.
 
 Record the exact successful Actions run, artifact, installed build/certificate and
 manual test outcomes here after testing. The development chat supplies exact links.
+
+## 0.2.0 beta updater
+
+An Updates screen now manually checks public tested TV prereleases, downloads an
+arm64 APK, verifies SHA256/package/newer version/installed signing certificate, and
+opens Android's confirmation installer. Install-source permission is required once.
+There are no background checks and no GitHub credentials in the app. End streaming
+before installing. Install this updater build manually once; future betas use the
+button. Test the full upgrade and preserved pairing on Shield. No host changes.

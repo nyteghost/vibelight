@@ -97,3 +97,40 @@ The ordinary core logcat can still contain host/app names or LAN addresses; do n
 automatically upload physical-device logs. No cloud AI/telemetry service is added.
 Review upstream dependencies/security before broad distribution; the pin guarantees
 reproducibility, not that every inherited dependency is current or audited.
+
+## ADR: manual beta updater (0.2.0)
+
+Use public GitHub TV prereleases instead of authenticated Actions artifact downloads.
+The immutable `tv-beta-VERSIONCODE` tag references the exact tested beta SHA. Only
+after the arm64 build and x86 emulator gate pass does the limited contents-write
+publication job validate the artifact, create a draft with all assets, then publish
+as a non-latest prerelease. Tags do not match the desktop `v*` release workflow.
+The desktop updater uses `/releases/latest`, which excludes these TV prereleases.
+
+A manual foreground updater reads the public releases API and a bounded JSON
+manifest. It rejects drafts, non-TV tags, cross-repository assets, mismatched source,
+non-integer/bounded version metadata and wrong package/ABI/SDK. HTTPS redirects are
+limited to explicit GitHub/CDN hosts; no token, cookies, TLS bypass or external URL
+from the manifest. Download length/SHA256 are checked before PackageManager checks
+archive package/version and compares its signer to the installed signer. The actual
+APK is revalidated before installer handoff; Android performs final signature checks.
+
+Only `cache/tv-updates/` is exposed through a non-exported AndroidX FileProvider,
+with a temporary read grant for the selected APK. REQUEST_INSTALL_PACKAGES and
+Android's per-source permission plus final confirmation are required. Nothing
+silently installs, uninstalls, resets pairing, changes host settings or schedules
+background polling. Cancellation invalidates UI callbacks, aborts active requests
+and removes partial files. Verified cache can resume installation after reopening.
+A process-local lifecycle counter blocks installation while a Game activity exists.
+
+AndroidX Core FileProvider 1.12.0 is Apache-2.0 licensed; its license is packaged in
+assets/AndroidX-LICENSE.txt. See official FileProvider/installer documentation:
+https://developer.android.com/reference/androidx/core/content/FileProvider
+https://developer.android.com/reference/android/content/Intent#ACTION_INSTALL_PACKAGE
+
+CI covers policy boundaries, release manifest validation, real APK archive/hash
+checks, same-version/hash refusal, provider scope, and reaching/cancelling Android's
+installer prompt. It does not complete a physical Shield upgrade or claim a live
+stream's successful cleanup. The first updater build has no newer published version
+to install until the next beta; physical download→upgrade/pairing preservation remains
+a manual acceptance case. Cached debug signing remains an interim limitation.

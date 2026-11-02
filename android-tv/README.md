@@ -11,6 +11,7 @@ Vibelight TV dashboard with a pinned Moonlight Android streaming foundation.
 - [Roadmap and exact validation boundaries](docs/ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 - [Obsidian-ready project note](docs/OBSIDIAN.md)
+- [Direct beta APK releases](https://github.com/nyteghost/vibelight/releases) — in-app Updates supported from 0.2.0 onward.
 - [APK builds](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml)
 
 ## Build from source
@@ -55,3 +56,17 @@ CI additionally compiles both Shield arm64 and emulator x86 APKs, runs Android l
 checks packaging boundaries and post-pair navigation callbacks, and installs/launches the x86 APK on an Android TV
 emulator for D-pad/Back navigation. These checks do not verify Shield MediaCodec,
 a real Vibebeam pairing, audio/input transport, HDR or streaming performance.
+
+## Beta publishing and updating
+
+The workflow publishes immutable `tv-beta-VERSIONCODE` prereleases only after both
+APK jobs (including emulator checks) pass. Only its publication job has contents
+write permission; tokens are never embedded in the app. A draft is populated with
+APK, manifest, source and checksums before publication. TV prereleases do not replace
+the desktop latest stable release or touch main. `make_release.py` rejects mismatched
+source/package/version/ABI/hash information before publishing.
+
+Updater checks are manual. Files use private app cache and FileProvider grants to
+Android's installer; installation needs permission and confirmation. Signature
+mismatch and same/older versions are refused. The running stream activity blocks
+installation. Install 0.2.0 manually once to enable this path for future betas.

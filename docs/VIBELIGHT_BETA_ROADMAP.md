@@ -235,3 +235,14 @@ gates. This does not finish the desktop display manager, toolbar or transfer cen
 - The test failed before the import fix and passes with Qt 6.12 after it. Existing
   profile/settings UI tests and Qt-free logic tests also pass locally. Hosted
   Windows packaging and physical host streaming remain separate validation gates.
+
+## Passive streaming check (November 2 beta)
+
+- [x] Ten-second observation, cancellation, explicit remote/LAN context and redacted ZIP/prompt export in the desktop shortcut menu.
+- [x] Measured frame/decode/RTT/receive-rate fields; unknown metrics remain unavailable. No automatic setting changes.
+- [x] Companion authenticated, read-only Vibebeam capture observations with older-host fallback.
+- [ ] Exact Windows and Arch build artifacts verified for these changes.
+- [ ] Physical work-to-home test and cursor/audio/display cleanup confirmation.
+- [ ] Per-session host encoder/applied-bitrate telemetry, optional cleanup recording and Android TV diagnostic UI.
+
+See [Streaming check](STREAMING_CHECK.md). Existing host-card 2FA work remains a separate paused draft.

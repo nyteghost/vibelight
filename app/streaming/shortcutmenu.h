@@ -4,6 +4,7 @@
 #include <SDL_ttf.h>
 
 #include <QByteArray>
+#include "streamcheckreport.h"
 #include <QString>
 #include <QStringList>
 #include <memory>
@@ -46,7 +47,7 @@ public:
 
     // Call regularly from the event loop; hides transient messages when they expire.
     void tick();
-    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_Revealed || m_HostFilesLoading || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
+    bool needsTick() const { return m_TransientUntil != 0 || m_CheckActive || m_CheckExport || m_Revealed || m_HostFilesLoading || m_ScreenshotAt != 0 || m_ScreenshotSaveState != nullptr || m_GraphEnabled; }
 
     // Notifications normally use the shortcuts button's position. Bitrate
     // notifications can instead be anchored to the stream window.
@@ -75,6 +76,7 @@ private:
         KindClient,     // one of Vibelight's own Ctrl+Alt+Shift+key actions
         KindOpenConfig, // open the custom shortcuts file in the default editor
         KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
+        KindCheckCancel, KindCheckScope, KindCheckOpen, KindCheckCopy,
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
         KindPreviewBitrate, // display the user-chosen bitrate notification location
         KindPreviewIdlePrompt, // test the idle response window
@@ -233,6 +235,12 @@ private:
     int m_LastTimerSecond;
 
     // Connection check state
+    std::shared_ptr<vibelight::CheckExportState> m_CheckExport;
+    QString m_CheckReportPath;
+    int m_CheckScope = 0; // unspecified, remote, LAN; explicit user choice.
+    unsigned int m_CheckStartedAt = 0;
+    bool m_CheckHaveStart = false;
+    QJsonObject m_CheckContext;
     bool m_CheckActive;
     unsigned int m_CheckEndsAt;
     unsigned int m_CheckStartFrames;

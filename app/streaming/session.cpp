@@ -1,3 +1,10 @@
+#include "streamcheckreport.h"
+#include "diagnosticzip.h"
+#include <QSaveFile>
+#include <QJsonDocument>
+#include <QDateTime>
+#include <QUuid>
+#include <QCoreApplication>
 #include "session.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
@@ -2642,6 +2649,52 @@ std::string Session::getStreamSummary() const
     }
 
     return parts.join("  |  ").toStdString();
+}
+
+QJsonObject Session::streamCheckContext() const
+{
+    const char* codec = (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_AV1) ? "AV1" :
+                        (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_H265) ? "HEVC" :
+                        (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "unknown";
+    return {{"codec", codec}, {"width", m_ActiveVideoWidth}, {"height", m_ActiveVideoHeight},
+            {"fps", m_ActiveVideoFrameRate}, {"client_configured_bitrate_kbps", m_StreamConfig.bitrate},
+            {"ten_bit", bool(m_ActiveVideoFormat & VIDEO_FORMAT_MASK_10BIT)}};
+}
+
+std::shared_ptr<vibelight::CheckExportState> Session::exportStreamingCheck(QJsonObject report)
+{
+    auto state = std::make_shared<vibelight::CheckExportState>();
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    report["client_version"] = QCoreApplication::applicationVersion();
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid, report]() mutable {
+        QString path;
+        try {
+            NvHTTP http(address, port, certificate, trueUid);
+            report["host"] = vibelight::sanitizeCheckHost(http.streamingCheck());
+            const auto json = QJsonDocument(report).toJson(QJsonDocument::Indented);
+            const auto instructions = vibelight::checkPrompt() + "\nPrivacy: typed metrics only; raw logs, PC names, addresses, UUIDs and credentials are excluded.\nCapture CPU submission time is not end-to-end latency. Recent receive Mbps is a short rolling average. Network-dropped frames are not a packet-loss measurement. Audio, cursor, restoration and physical latency require confirmation.\n";
+            const auto zip = vibelight::diagnosticZip(json.toStdString(), instructions.toStdString());
+            const auto root = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+            const auto directory = root + "/Vibelight/Diagnostics";
+            if (!root.isEmpty() && !zip.empty() && QDir().mkpath(directory)) {
+                const auto name = "Streaming-check-" + QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss") + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".zip";
+                QSaveFile file(directory + "/" + name);
+                if (file.open(QIODevice::WriteOnly)) {
+                    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                    if (file.write(zip.data(), static_cast<qint64>(zip.size())) == static_cast<qint64>(zip.size()) && file.commit()) path = file.fileName();
+                }
+            }
+        } catch (...) {} // Export failure never changes stream/session handling.
+        QMutexLocker locker(&state->lock);
+        state->path = path;
+        state->done = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+    return state;
 }
 
 bool Session::getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot)

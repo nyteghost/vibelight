@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include "streamcheckreport.h"
 #include <QtGlobal>
 #include <QMutex>
 #include <QWaitCondition>
@@ -163,6 +164,9 @@ public:
 
     // Used by the shortcut menu's connection check
     bool getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot);
+
+    QJsonObject streamCheckContext() const;
+    std::shared_ptr<vibelight::CheckExportState> exportStreamingCheck(QJsonObject report);
 
     // "PC name  |  1920x1080@60  |  HEVC 10-bit", shown in the shortcut menu
     std::string getStreamSummary() const;

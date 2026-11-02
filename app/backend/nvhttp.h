@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <atomic>
+#include <QJsonObject>
 
 class NvComputer;
 
@@ -218,6 +219,8 @@ public:
     QVector<NvDisplayMode>
     getDisplayModeList(QString serverInfo);
 
+    QJsonObject streamingCheck();
+
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
 private:
@@ -229,7 +232,7 @@ private:
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel);
+                   NvLogLevel logLevel, qint64 maxResponseBytes = 0);
 
     bool
     clipboardRequest(bool post, const QByteArray& body, QByteArray& response, QString& error);

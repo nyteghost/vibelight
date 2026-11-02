@@ -758,8 +758,10 @@ bool FFmpegVideoDecoder::getConnectionSnapshot(PCONNECTION_SNAPSHOT snapshot)
 {
     // The decoder thread folds each ~1 second stats window into the global stats, so a
     // read from another thread can be about a second stale but is never meaningfully wrong.
-    snapshot->totalFrames = m_GlobalVideoStats.totalFrames;
-    snapshot->networkDroppedFrames = m_GlobalVideoStats.networkDroppedFrames;
+    VIDEO_STATS stats;
+    { std::lock_guard<std::mutex> lock(m_ConnectionStatsMutex); stats = m_GlobalVideoStats; }
+    snapshot->totalFrames = stats.totalFrames;
+    snapshot->networkDroppedFrames = stats.networkDroppedFrames;
     snapshot->videoMbps = m_BwTracker.GetAverageMbps();
 
     uint32_t rtt = 0, rttVariance = 0;
@@ -768,9 +770,9 @@ bool FFmpegVideoDecoder::getConnectionSnapshot(PCONNECTION_SNAPSHOT snapshot)
     }
     snapshot->rttMs = rtt;
     snapshot->rttVarianceMs = rttVariance;
-    snapshot->decodedFrames = m_GlobalVideoStats.decodedFrames;
-    snapshot->pacerDroppedFrames = m_GlobalVideoStats.pacerDroppedFrames;
-    snapshot->totalDecodeTimeUs = m_GlobalVideoStats.totalDecodeTimeUs;
+    snapshot->decodedFrames = stats.decodedFrames;
+    snapshot->pacerDroppedFrames = stats.pacerDroppedFrames;
+    snapshot->totalDecodeTimeUs = stats.totalDecodeTimeUs;
     return true;
 }
 
@@ -2153,7 +2155,8 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         }
 
         // Accumulate these values into the global stats
-        addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+        { std::lock_guard<std::mutex> lock(m_ConnectionStatsMutex);
+          addVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats); }
 
         // Move this window into the last window slot and clear it for next window
         SDL_memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));

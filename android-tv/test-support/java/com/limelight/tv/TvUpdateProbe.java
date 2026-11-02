@@ -17,6 +17,12 @@ public final class TvUpdateProbe extends Instrumentation {
     private void check(boolean b,String message){if(!b)throw new AssertionError(message);}
     private interface Attempt {void run() throws Exception;}
     private void reject(Attempt a) throws Exception {try{a.run();throw new AssertionError("Unsafe update was accepted");}catch(IOException|IllegalArgumentException expected){}}
+    private boolean hasText(android.view.accessibility.AccessibilityNodeInfo node,String wanted) {
+        if(node==null)return false;
+        if(node.getText()!=null&&wanted.equalsIgnoreCase(node.getText().toString().trim()))return true;
+        for(int i=0;i<node.getChildCount();i++)if(hasText(node.getChild(i),wanted))return true;
+        return false;
+    }
     @Override public void onStart(){Bundle result=new Bundle();File fixture=null;
         try {
             Context context=getTargetContext();long version=TvUpdateClient.installedVersion(context);
@@ -48,9 +54,13 @@ public final class TvUpdateProbe extends Instrumentation {
             runOnMainSync(()->activity.startActivityForResult(installer,72));
             boolean prompt=false;long until=SystemClock.uptimeMillis()+10000;
             while(SystemClock.uptimeMillis()<until){android.view.accessibility.AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();
-                if(root!=null&&root.getPackageName()!=null&&root.getPackageName().toString().contains("packageinstaller")){prompt=true;break;}SystemClock.sleep(100);}
+                if(root!=null&&root.getPackageName()!=null&&root.getPackageName().toString().contains("packageinstaller")&&hasText(root,"Install")&&hasText(root,"Vibelight TV Beta")){prompt=true;break;}SystemClock.sleep(100);}
             check(prompt,"Android installer confirmation was not reached");
-            check(getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK),"Cannot cancel installer in test");waitForIdleSync();runOnMainSync(activity::finish);
+            check(getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK),"Cannot cancel installer in test");
+            boolean returned=false;until=SystemClock.uptimeMillis()+10000;
+            while(SystemClock.uptimeMillis()<until){final boolean[] focused={false};runOnMainSync(()->focused[0]=activity.hasWindowFocus());if(focused[0]){returned=true;break;}SystemClock.sleep(100);}
+            check(returned,"Cancelling installation did not return to Vibelight");
+            waitForIdleSync();runOnMainSync(activity::finish);
             result.putString("stream","Update validation passed: real APK hash/package/signature, same-version refusal, hash mismatch, private provider scope, Android installer prompt and cancellation. No network download or actual version upgrade performed.");
             finish(Activity.RESULT_OK,result);
         } catch(Throwable e){result.putString("stream",android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}

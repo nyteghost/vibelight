@@ -54,11 +54,11 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -fPIC -I app tests/host_profile_tests.cpp $(pkg-config --cflags --libs Qt6Core) -o host_profile_tests
           ./host_profile_tests
-      - name: Exercise profile editor save and cancel
+      - name: Exercise profile editor and app-tile launch
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
-        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml -import tests/qml/stubs
 
   # Runs the one-click updater script against throwaway folders on Windows.
   updater-tests:

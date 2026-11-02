@@ -218,3 +218,20 @@ Vibelight TV dashboard and explicit next-stream profiles/guidance.
 The Android workflow must pass on the exact head before its APK is recommended.
 Hardware streaming, HDR, controllers, latency and cleanup remain physical-device
 gates. This does not finish the desktop display manager, toolbar or transfer center.
+
+## November 2 — app launch and context-menu reliability
+
+- Fixed the stream page's QtQuick import: its reconnect `Shortcut` was unavailable
+  under import 2.0, preventing the page from loading after an app tile click.
+- App/quit page creation now checks component readiness and object creation, and
+  presents a visible error instead of silently pushing a null page.
+- Direct Launch and Hide Game explanations are inline, wrapped menu text instead
+  of hover tooltips obscured by the context menu. Menus are bounded to the view,
+  preserve checkbox space, inherit theme text colors and expose accessible help.
+- Added Qt Quick tests using isolated app/session/navigation stubs: real tile
+  mouse activation reaches session initialization/start, a missing component
+  yields an error without starting a session, and narrow menu descriptions and
+  keyboard checkbox activation remain usable.
+- The test failed before the import fix and passes with Qt 6.12 after it. Existing
+  profile/settings UI tests and Qt-free logic tests also pass locally. Hosted
+  Windows packaging and physical host streaming remain separate validation gates.

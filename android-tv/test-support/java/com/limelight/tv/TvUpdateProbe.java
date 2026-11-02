@@ -50,7 +50,7 @@ public final class TvUpdateProbe extends Instrumentation {
             while(SystemClock.uptimeMillis()<until){android.view.accessibility.AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();
                 if(root!=null&&root.getPackageName()!=null&&root.getPackageName().toString().contains("packageinstaller")){prompt=true;break;}SystemClock.sleep(100);}
             check(prompt,"Android installer confirmation was not reached");
-            sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);waitForIdleSync();runOnMainSync(activity::finish);
+            check(getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK),"Cannot cancel installer in test");waitForIdleSync();runOnMainSync(activity::finish);
             result.putString("stream","Update validation passed: real APK hash/package/signature, same-version refusal, hash mismatch, private provider scope, Android installer prompt and cancellation. No network download or actual version upgrade performed.");
             finish(Activity.RESULT_OK,result);
         } catch(Throwable e){result.putString("stream",android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}

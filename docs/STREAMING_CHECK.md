@@ -29,3 +29,13 @@ Cursor visibility/shape/alignment, audible synchronized audio, restored physical
 ## Validation
 
 Automated tests cover counter resets/invalid intervals/no-video/no-decode, fixed archive names/CRC/size limits, host authorization, stale/invalid capture observations, and client export allowlisting. CI also builds the Windows client and the hosted Arch host package. Physical work-to-home Windows/CachyOS streaming, visual/audio checks, and final package installation remain hardware tests. No performance improvement is claimed.
+
+## Windows build correction
+
+The first streaming-check Windows build (`16e0eb4`) failed compilation because
+the bounded-response callbacks were placed in the monitor-list request instead
+of `NvHTTP::openConnection`, which owns `maxResponseBytes`. The callbacks now
+run in the bounded request path, retaining certificate pinning, response limits,
+and manual redirect handling. CI also syntax-compiles the complete production
+HTTP client in the Qt test job so helper-only tests cannot miss this scope error.
+A successful Windows build and physical streaming validation are still required.

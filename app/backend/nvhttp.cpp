@@ -602,18 +602,6 @@ NvHTTP::getMonitors(QStringList& ids, QStringList& names, QString& error)
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
     QNetworkReply* reply = m_Nam->get(request);
-    if (maxResponseBytes > 0) {
-        const auto pinnedCertificate = m_ServerCert;
-        connect(reply, &QNetworkReply::encrypted, reply, [reply, pinnedCertificate]() {
-            if (pinnedCertificate.isNull() || reply->sslConfiguration().peerCertificate() != pinnedCertificate) reply->abort();
-        });
-        connect(reply, &QNetworkReply::readyRead, reply, [reply, maxResponseBytes]() {
-            if (reply->bytesAvailable() > maxResponseBytes) reply->abort();
-        });
-        connect(reply, &QNetworkReply::downloadProgress, reply, [reply, maxResponseBytes](qint64 received, qint64 total) {
-            if (received > maxResponseBytes || total > maxResponseBytes) reply->abort();
-        });
-    }
 
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -1267,6 +1255,18 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
     QNetworkReply* reply = m_Nam->get(request);
+    if (maxResponseBytes > 0) {
+        const auto pinnedCertificate = m_ServerCert;
+        connect(reply, &QNetworkReply::encrypted, reply, [reply, pinnedCertificate]() {
+            if (pinnedCertificate.isNull() || reply->sslConfiguration().peerCertificate() != pinnedCertificate) reply->abort();
+        });
+        connect(reply, &QNetworkReply::readyRead, reply, [reply, maxResponseBytes]() {
+            if (reply->bytesAvailable() > maxResponseBytes) reply->abort();
+        });
+        connect(reply, &QNetworkReply::downloadProgress, reply, [reply, maxResponseBytes](qint64 received, qint64 total) {
+            if (received > maxResponseBytes || total > maxResponseBytes) reply->abort();
+        });
+    }
 
     // Run the request with a timeout if requested
     QEventLoop loop;

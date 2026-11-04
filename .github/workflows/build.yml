@@ -56,8 +56,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y qt6-base-dev qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript pkg-config
       - name: Compile production HTTP client (streaming-check regression)
         run: |
-          git submodule update --init moonlight-common-c
-          g++ -std=c++17 -fPIC -fsyntax-only -I moonlight-common-c/src $(pkg-config --cflags Qt6Core Qt6Network Qt6Gui) app/backend/nvhttp.cpp
+          git submodule update --init --recursive moonlight-common-c/moonlight-common-c
+          g++ -std=c++17 -fPIC -fsyntax-only -I moonlight-common-c/moonlight-common-c/src $(pkg-config --cflags Qt6Core Qt6Network Qt6Gui) app/backend/nvhttp.cpp
       - name: Exercise host profile isolation and persistence
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -fPIC -I app tests/host_profile_tests.cpp $(pkg-config --cflags --libs Qt6Core) -o host_profile_tests

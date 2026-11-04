@@ -176,6 +176,11 @@ public:
              const QString& twoFactorCode = QString(),
              const QString& monitorId = QString());
 
+    // Host-selection preflight (paired Vibebeam only). 200 verified, 470 needed,
+    // 471 invalid, 472 locked, 473 unavailable; 0 for transport/other errors.
+    // Must run on a worker thread; never stores the authenticator code.
+    int checkHostTwoFactor(const QString& code, QString& error);
+
     // Clipboard sync with Apollo-style hosts such as Vibepollo (text only). Both return false and
     // fill in a short explanation when the host refuses or can't be reached.
     bool

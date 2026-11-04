@@ -576,6 +576,82 @@ NvHTTP::clipboardRequest(bool post, const QByteArray& body, QByteArray& response
     return true;
 }
 
+int
+NvHTTP::checkHostTwoFactor(const QString& code, QString& error)
+{
+    error.clear();
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = tr("The host isn't paired over HTTPS.");
+        return 0;
+    }
+    const QByteArray codeBytes = code.trimmed().toUtf8();
+    if (codeBytes.size() > 64) {
+        error = tr("The two-factor code is too long.");
+        return 0;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/actions/two-factor");
+    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex());
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain; charset=utf-8");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+#endif
+
+    const auto errors = connect(m_Nam, &QNetworkAccessManager::sslErrors,
+                                this, &NvHTTP::handleSslErrors);
+    // The code is sent in the POST body, not exposed in a URL or log entry.
+    QNetworkReply* reply = codeBytes.isEmpty() ? m_Nam->get(request) : m_Nam->post(request, codeBytes);
+    const QSslCertificate pinned = m_ServerCert;
+    connect(reply, &QNetworkReply::encrypted, reply, [reply, pinned]() {
+        if (pinned.isNull() || reply->sslConfiguration().peerCertificate() != pinned) reply->abort();
+    });
+    constexpr qint64 maxResponseBytes = 4096;
+    connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
+        if (reply->bytesAvailable() > 4096) reply->abort();
+    });
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
+        if (received > 4096 || total > 4096) reply->abort();
+    });
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) reply->abort();
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+    m_Nam->clearAccessCache();
+#endif
+    disconnect(errors);
+    const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QNetworkReply::NetworkError netError = reply->error();
+    const QByteArray body = reply->read(maxResponseBytes + 1);
+    delete reply;
+    if (timedOut || netError != QNetworkReply::NoError || httpStatus != 200 || body.size() > maxResponseBytes) {
+        error = timedOut ? tr("The host didn't answer the two-factor check.") :
+                tr("The secure two-factor check failed (HTTP %1, network %2).").arg(httpStatus).arg(int(netError));
+        return 0;
+    }
+    try {
+        verifyResponseStatus(QString::fromUtf8(body));
+        return 200;
+    }
+    catch (const GfeHttpResponseException& exception) {
+        const int status = exception.getStatusCode();
+        if (status == 470 || status == 471 || status == 472 || status == 473) return status;
+        error = exception.toQString();
+        return 0;
+    }
+}
+
 bool
 NvHTTP::getMonitors(QStringList& ids, QStringList& names, QString& error)
 {

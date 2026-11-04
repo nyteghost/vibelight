@@ -61,3 +61,22 @@ A new stream should use the saved profile. Verify explicit CLI flags, adaptive
 bitrate on/off, unsupported modes, secondary windows, keyboard/controller focus,
 and the editor at short/narrow window sizes. Build/test success is not equivalent
 to real streaming or hardware validation.
+
+## Host-selection two-factor verification (beta)
+
+For a paired Vibebeam host advertising `2fa-preflight`, selecting the
+computer tile (or **View All Apps**) checks the host's 2FA status before the
+application grid opens. Codes are sent in a bounded, pinned-HTTPS POST body
+and are never written to settings. Cancel, wrong code, lockout, unpaired
+client and network failures all block navigation; an incorrect code can be
+retried without leaving Computers.
+
+Older hosts retain the original launch-time code prompt. The host continues
+to enforce 2FA at every stream launch/resume, including after its existing
+120-second per-client grace expires. Thus staying in the app list for more
+than two minutes may cause another prompt; the client never fakes a lasting
+trusted session. The early prompt does not replace or weaken the host gate.
+
+After matching beta host/client builds pass CI, manually test correct code,
+wrong code, cancel, host disconnect while waiting, exempt clients, backup
+code consumption, and a stream started after grace expiration.

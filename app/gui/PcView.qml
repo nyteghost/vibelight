@@ -23,6 +23,83 @@ CenteredGridView {
     cellHeight: 344
     objectName: qsTr("Computers")
 
+    property bool hostAuthPending: false
+    property int hostAuthIndex: -1
+    property string hostAuthName: ""
+    property bool hostAuthShowAll: false
+
+    function openHostApps(index, name, showAll) {
+        var component = Qt.createComponent("AppView.qml")
+        if (component.status !== Component.Ready) {
+            errorDialog.text = qsTr("Couldn't open the host's app list: ") + component.errorString()
+            errorDialog.helpText = ""
+            errorDialog.open()
+            return
+        }
+        var page = component.createObject(stackView, {
+            "computerIndex": index, "objectName": name, "showHiddenGames": showAll
+        })
+        if (!page) {
+            errorDialog.text = qsTr("Couldn't create the host's app list.")
+            errorDialog.helpText = ""
+            errorDialog.open()
+            return
+        }
+        stackView.push(page)
+    }
+
+    function cancelHostSelection() {
+        if (hostAuthPending && hostAuthIndex >= 0) {
+            computerModel.cancelTwoFactorForComputer(hostAuthIndex)
+        }
+        hostAuthPending = false
+        hostAuthIndex = -1
+        hostAuthWaitDialog.close()
+        hostTwoFactorDialog.close()
+    }
+
+    function selectHost(index, name, showAll) {
+        if (hostAuthPending) return
+        if (!computerModel.supportsHostTwoFactorPreflight(index)) {
+            // Legacy hosts retain their existing prompt at actual stream launch.
+            openHostApps(index, name, showAll)
+            return
+        }
+        hostAuthPending = true
+        hostAuthIndex = index
+        hostAuthName = name
+        hostAuthShowAll = showAll
+        hostAuthWaitDialog.open()
+        computerModel.checkTwoFactorForComputer(index, "")
+    }
+
+    function twoFactorCheckComplete(index, status, error) {
+        if (!hostAuthPending || index !== hostAuthIndex) return
+        hostAuthWaitDialog.close()
+        if (status === 200) {
+            var name = hostAuthName
+            var showAll = hostAuthShowAll
+            hostAuthPending = false
+            hostAuthIndex = -1
+            openHostApps(index, name, showAll)
+            return
+        }
+        if (status === 470 || status === 471) {
+            hostTwoFactorDialog.message = status === 471 ?
+                qsTr("That code was not accepted. Enter a new code or a backup code.") :
+                qsTr("This computer requires a two-factor code before opening its apps.")
+            hostTwoFactorDialog.open()
+            return
+        }
+        cancelHostSelection()
+        errorDialog.text = status === 472 ?
+            qsTr("Too many incorrect two-factor codes. Please try again later.") :
+            status === 473 ? qsTr("Two-factor verification is unavailable on the host.") :
+            (error || qsTr("The host could not verify two-factor access."))
+        errorDialog.helpText = ""
+        errorDialog.open()
+    }
+
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
         // We do this here instead of onActivated to avoid losing the user's
@@ -45,6 +122,7 @@ CenteredGridView {
 
     StackView.onDeactivating: {
         ComputerManager.computerAddCompleted.disconnect(addComplete)
+        if (hostAuthPending) cancelHostSelection()
     }
 
     function pairingComplete(error)
@@ -83,6 +161,7 @@ CenteredGridView {
         model.pairingCompleted.connect(pairingComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
         model.monitorsReady.connect(chooseMonitorDialog.monitorsReady)
+        model.twoFactorCheckCompleted.connect(twoFactorCheckComplete)
         return model
     }
 
@@ -287,9 +366,7 @@ CenteredGridView {
                 NavigableMenuItem {
                     text: qsTr("View All Apps")
                     onTriggered: {
-                        var component = Qt.createComponent("AppView.qml")
-                        var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name, "showHiddenGames": true})
-                        stackView.push(appView)
+                        pcGrid.selectHost(index, model.name, true)
                     }
                     visible: model.online && model.paired
                 }
@@ -351,10 +428,8 @@ CenteredGridView {
                     errorDialog.open()
                 }
                 else if (model.paired) {
-                    // go to game view
-                    var component = Qt.createComponent("AppView.qml")
-                    var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name})
-                    stackView.push(appView)
+                    // Verify host access before entering the app grid.
+                    pcGrid.selectHost(index, model.name, false)
                 }
                 else {
                     var pin = computerModel.generatePinString()
@@ -422,6 +497,63 @@ CenteredGridView {
         // Using Setup-Guide here instead of Troubleshooting because it's likely that users
         // will arrive here by forgetting to enable GameStream or not forwarding ports.
         helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide"
+    }
+
+    NavigableMessageDialog {
+        id: hostAuthWaitDialog
+        objectName: "hostAuthWaitDialog"
+        title: qsTr("Checking host access")
+        text: qsTr("Checking whether this computer requires two-factor verification…")
+        showSpinner: true
+        standardButtons: Dialog.Cancel
+        closePolicy: Popup.NoAutoClose
+        onRejected: pcGrid.cancelHostSelection()
+    }
+
+    NavigableDialog {
+        id: hostTwoFactorDialog
+        objectName: "hostTwoFactorDialog"
+        title: qsTr("Two-factor code")
+        property string message
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+        onOpened: {
+            hostTwoFactorCode.text = ""
+            hostTwoFactorCode.forceActiveFocus()
+        }
+        onRejected: pcGrid.cancelHostSelection()
+        onAccepted: {
+            var code = hostTwoFactorCode.text.trim()
+            hostTwoFactorCode.text = ""
+            if (!code) {
+                message = qsTr("Enter a code from your authenticator or a backup code.")
+                Qt.callLater(function() { if (pcGrid.hostAuthPending) hostTwoFactorDialog.open() })
+                return
+            }
+            if (pcGrid.hostAuthPending && pcGrid.hostAuthIndex >= 0) {
+                hostAuthWaitDialog.open()
+                computerModel.checkTwoFactorForComputer(pcGrid.hostAuthIndex, code)
+            }
+        }
+        Column {
+            spacing: 12
+            width: 380
+            Label {
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: hostTwoFactorDialog.message
+            }
+            TextField {
+                id: hostTwoFactorCode
+                objectName: "hostTwoFactorCode"
+                width: parent.width
+                maximumLength: 16
+                echoMode: TextInput.Password
+                inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                placeholderText: qsTr("123456")
+                onAccepted: hostTwoFactorDialog.accept()
+            }
+        }
     }
 
     NavigableMessageDialog {

@@ -259,6 +259,70 @@ void ComputerModel::handleComputerStateChanged(NvComputer* computer)
 
 #include "computermodel.moc"
 
+bool ComputerModel::supportsHostTwoFactorPreflight(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return false;
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->state == NvComputer::CS_ONLINE &&
+           computer->pairState == NvComputer::PS_PAIRED &&
+           computer->vibebeamFeatures.contains("2fa-preflight");
+}
+
+void ComputerModel::cancelTwoFactorForComputer(int computerIndex)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return;
+    ++m_TwoFactorRequestGenerations[m_Computers[computerIndex]->uuid];
+}
+
+void ComputerModel::checkTwoFactorForComputer(int computerIndex, QString code)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count() ||
+        !supportsHostTwoFactorPreflight(computerIndex)) {
+        emit twoFactorCheckCompleted(computerIndex, 0,
+                                     tr("This host does not support early two-factor verification."));
+        return;
+    }
+    NvComputer* computer = m_Computers[computerIndex];
+    const QString uuid = computer->uuid;
+    const NvAddress address = computer->activeAddress;
+    const uint16_t httpsPort = computer->activeHttpsPort;
+    const QSslCertificate cert = computer->serverCert;
+    const bool trueUid = !computer->isNvidiaServerSoftware;
+    const quint64 generation = ++m_TwoFactorRequestGenerations[uuid];
+
+    // The worker never reads a mutable host pointer or the model.
+    const auto modelGuard = std::make_shared<QPointer<ComputerModel>>(this);
+    QThread* thread = QThread::create([modelGuard, uuid, generation, address, httpsPort,
+                                      cert, trueUid, code = std::move(code)]() {
+        NvHTTP http(address, httpsPort, cert, trueUid);
+        QString error;
+        const int status = http.checkHostTwoFactor(code, error);
+        if (auto* app = QCoreApplication::instance()) {
+            QMetaObject::invokeMethod(app, [modelGuard, uuid, generation, status, error]() {
+                ComputerModel* model = modelGuard->data();
+                if (!model || model->m_TwoFactorRequestGenerations.value(uuid) != generation) return;
+                for (int row = 0; row < model->m_Computers.size(); ++row) {
+                    NvComputer* candidate = model->m_Computers[row];
+                    if (candidate && candidate->uuid == uuid) {
+                        // Fail closed if this is no longer the same paired, online host.
+                        if (!model->supportsHostTwoFactorPreflight(row)) {
+                            emit model->twoFactorCheckCompleted(row, 0,
+                                ComputerModel::tr("The host disconnected or changed during verification."));
+                        } else {
+                            emit model->twoFactorCheckCompleted(row, status, error);
+                        }
+                        return;
+                    }
+                }
+                model->m_TwoFactorRequestGenerations.remove(uuid);
+            }, Qt::QueuedConnection);
+        }
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 void ComputerModel::chooseMonitorForComputer(int computerIndex)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {

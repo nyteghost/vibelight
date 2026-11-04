@@ -12,13 +12,14 @@ GroupBox {
         radius: 14
         color: "#0D1424"
         border.width: 1
-        border.color: "#1E2640"
+        border.color: "#26334D"
     }
 
     label: Label {
         x: control.leftPadding
         width: control.availableWidth
         text: control.title
+        textFormat: Text.PlainText
         font: control.font
         color: "#A5B4FC"
         elide: Text.ElideRight

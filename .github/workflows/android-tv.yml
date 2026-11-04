@@ -1,0 +1,145 @@
+name: Vibelight TV Beta APK
+on:
+  push:
+    branches: [beta/next-features-20261028]
+    paths: ['android-tv/**', '.github/workflows/android-tv.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-tv-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    if: github.ref == 'refs/heads/beta/next-features-20261028'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86]
+    env:
+      VIBELIGHT_TV_ABI: ${{ matrix.abi }}
+      VIBELIGHT_TV_TEST_KEYSTORE: /tmp/vibelight-tv-signing/debug.keystore
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Select Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Native-free policy tests
+        run: |
+          mkdir -p /tmp/tv-policy
+          javac -d /tmp/tv-policy android-tv/overlay/java/com/limelight/tv/TvPolicy.java android-tv/tests/PolicyTest.java
+          java -cp /tmp/tv-policy PolicyTest
+          javac -d /tmp/tv-policy android-tv/overlay/java/com/limelight/tv/TvUpdatePolicy.java android-tv/overlay/java/com/limelight/tv/TvSessionState.java android-tv/tests/UpdatePolicyTest.java
+          java -cp /tmp/tv-policy UpdatePolicyTest
+          python3 android-tv/tests/test_release.py
+          python3 -m py_compile android-tv/prepare.py android-tv/tests/test_prepare.py android-tv/tests/emulator_smoke.py
+      - name: Fetch pinned Android protocol foundation
+        run: |
+          git clone --no-checkout https://github.com/moonlight-stream/moonlight-android.git "$RUNNER_TEMP/moonlight-android"
+          pin=$(python3 -c 'import json; print(json.load(open("android-tv/upstream.json"))["commit"])')
+          git -C "$RUNNER_TEMP/moonlight-android" checkout --detach "$pin"
+          git -C "$RUNNER_TEMP/moonlight-android" submodule update --init --recursive
+      - name: Prepare isolated Vibelight TV source
+        run: |
+          code=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          python3 android-tv/prepare.py --upstream "$RUNNER_TEMP/moonlight-android" --output "$RUNNER_TEMP/vibelight-tv" --version-code "$code"
+          python3 android-tv/tests/test_prepare.py "$RUNNER_TEMP/vibelight-tv"
+      - name: Install pinned Android toolchain
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-34' 'build-tools;34.0.0' 'ndk;23.2.8568313'
+      # A beta test key, never a production signing key. Eviction changes the certificate.
+      - name: Restore beta test signing identity
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VIBELIGHT_TV_TEST_KEYSTORE }}
+          key: vibelight-tv-beta-debug-key-v1-${{ matrix.abi }}
+      - name: Ensure explicit beta test signing key
+        run: |
+          mkdir -p "$(dirname "$VIBELIGHT_TV_TEST_KEYSTORE")"
+          if [ ! -f "$VIBELIGHT_TV_TEST_KEYSTORE" ]; then
+            keytool -genkeypair -keystore "$VIBELIGHT_TV_TEST_KEYSTORE" -storetype JKS -storepass android -keypass android -alias androiddebugkey -dname 'CN=Vibelight TV Beta Test' -keyalg RSA -keysize 2048 -validity 10000
+          fi
+      - name: Compile and lint Android APK
+        working-directory: ${{ runner.temp }}/vibelight-tv
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleNonRootDebug lintNonRootDebug
+      - name: Package APK, provenance, fingerprint and matching source
+        env:
+          OUTPUT: ${{ runner.temp }}/tv-output
+        run: |
+          mkdir -p "$OUTPUT"
+          cp "$RUNNER_TEMP/vibelight-tv/app/build/outputs/apk/nonRoot/debug/app-nonRoot-debug.apk" "$OUTPUT/Vibelight-TV-${{ matrix.abi }}-beta.apk"
+          cp "$RUNNER_TEMP/vibelight-tv/vibelight-build.json" "$OUTPUT/"
+          cp android-tv/docs/SHIELD_GUIDE.md "$OUTPUT/INSTALL.md"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$OUTPUT/"*.apk > "$OUTPUT/signing-certificate.txt"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$OUTPUT/"*.apk > "$OUTPUT/apk-badging.txt"
+          tar --exclude='./.gradle' --exclude='./.cxx' --exclude='*/build' -czf "$OUTPUT/matching-android-source.tar.gz" -C "$RUNNER_TEMP/vibelight-tv" .
+          cd "$OUTPUT"
+          sha256sum ./*.apk ./matching-android-source.tar.gz > SHA256SUMS
+      - name: Upload Shield beta package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: Vibelight-TV-${{ matrix.abi }}-beta-${{ github.run_number }}
+          path: ${{ runner.temp }}/tv-output/
+          if-no-files-found: error
+      - name: Allow emulator KVM
+        if: matrix.abi == 'x86'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator launch and D-pad navigation smoke test
+        if: matrix.abi == 'x86'
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 30
+          target: android-tv
+          profile: tv_1080p
+          arch: x86
+          disable-animations: true
+          script: python3 android-tv/tests/emulator_smoke.py "${{ runner.temp }}/tv-output/Vibelight-TV-x86-beta.apk" "${{ runner.temp }}/tv-smoke"
+      - name: Upload emulator evidence and lint report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: Vibelight-TV-test-evidence-${{ matrix.abi }}-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/tv-smoke/
+            ${{ runner.temp }}/vibelight-tv/app/build/reports/lint-results-nonRootDebug.*
+          if-no-files-found: ignore
+
+  publish-beta:
+    needs: apk
+    if: github.ref == 'refs/heads/beta/next-features-20261028'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Publish tested TV beta downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/beta/next-features-20261028" --jq '.object.sha')
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo 'A newer beta commit exists; skipping publication of this superseded build.'
+            exit 0
+          fi
+          destination="$RUNNER_TEMP/tv-publish"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "Vibelight-TV-arm64-v8a-beta-$GITHUB_RUN_NUMBER" --dir "$destination"
+          tag=$(python3 android-tv/make_release.py "$destination" "$GITHUB_SHA")
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease --latest=false --title "Vibelight TV Beta $tag" --notes-file "$destination/RELEASE_NOTES.md" \
+            "$destination/Vibelight-TV-arm64-v8a-beta.apk" "$destination/vibelight-tv-beta.json" \
+            "$destination/SHA256SUMS" "$destination/signing-certificate.txt" "$destination/vibelight-build.json" \
+            "$destination/matching-android-source.tar.gz" "$destination/INSTALL.md"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          echo "### TV beta download" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"

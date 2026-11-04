@@ -17,8 +17,88 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 20
     bottomMargin: 5
-    cellWidth: 310; cellHeight: 330;
+    // Fit one complete card on narrower windows while retaining the familiar
+    // 350px tile and keyboard/gamepad GridView navigation on larger screens.
+    cellWidth: Math.min(350, Math.max(260, width - 20))
+    cellHeight: 344
     objectName: qsTr("Computers")
+
+    property bool hostAuthPending: false
+    property int hostAuthIndex: -1
+    property string hostAuthName: ""
+    property bool hostAuthShowAll: false
+
+    function openHostApps(index, name, showAll) {
+        var component = Qt.createComponent("AppView.qml")
+        if (component.status !== Component.Ready) {
+            errorDialog.text = qsTr("Couldn't open the host's app list: ") + component.errorString()
+            errorDialog.helpText = ""
+            errorDialog.open()
+            return
+        }
+        var page = component.createObject(stackView, {
+            "computerIndex": index, "objectName": name, "showHiddenGames": showAll
+        })
+        if (!page) {
+            errorDialog.text = qsTr("Couldn't create the host's app list.")
+            errorDialog.helpText = ""
+            errorDialog.open()
+            return
+        }
+        stackView.push(page)
+    }
+
+    function cancelHostSelection() {
+        if (hostAuthPending && hostAuthIndex >= 0) {
+            computerModel.cancelTwoFactorForComputer(hostAuthIndex)
+        }
+        hostAuthPending = false
+        hostAuthIndex = -1
+        hostAuthWaitDialog.close()
+        hostTwoFactorDialog.close()
+    }
+
+    function selectHost(index, name, showAll) {
+        if (hostAuthPending) return
+        if (!computerModel.supportsHostTwoFactorPreflight(index)) {
+            // Legacy hosts retain their existing prompt at actual stream launch.
+            openHostApps(index, name, showAll)
+            return
+        }
+        hostAuthPending = true
+        hostAuthIndex = index
+        hostAuthName = name
+        hostAuthShowAll = showAll
+        hostAuthWaitDialog.open()
+        computerModel.checkTwoFactorForComputer(index, "")
+    }
+
+    function twoFactorCheckComplete(index, status, error) {
+        if (!hostAuthPending || index !== hostAuthIndex) return
+        hostAuthWaitDialog.close()
+        if (status === 200) {
+            var name = hostAuthName
+            var showAll = hostAuthShowAll
+            hostAuthPending = false
+            hostAuthIndex = -1
+            openHostApps(index, name, showAll)
+            return
+        }
+        if (status === 470 || status === 471) {
+            hostTwoFactorDialog.message = status === 471 ?
+                qsTr("That code was not accepted. Enter a new code or a backup code.") :
+                qsTr("This computer requires a two-factor code before opening its apps.")
+            hostTwoFactorDialog.open()
+            return
+        }
+        cancelHostSelection()
+        errorDialog.text = status === 472 ?
+            qsTr("Too many incorrect two-factor codes. Please try again later.") :
+            status === 473 ? qsTr("Two-factor verification is unavailable on the host.") :
+            (error || qsTr("The host could not verify two-factor access."))
+        errorDialog.helpText = ""
+        errorDialog.open()
+    }
 
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
@@ -42,6 +122,7 @@ CenteredGridView {
 
     StackView.onDeactivating: {
         ComputerManager.computerAddCompleted.disconnect(addComplete)
+        if (hostAuthPending) cancelHostSelection()
     }
 
     function pairingComplete(error)
@@ -80,7 +161,48 @@ CenteredGridView {
         model.pairingCompleted.connect(pairingComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
         model.monitorsReady.connect(chooseMonitorDialog.monitorsReady)
+        model.twoFactorCheckCompleted.connect(twoFactorCheckComplete)
         return model
+    }
+
+    // Home dashboard: the header scrolls with the cards, keeping controller
+    // and keyboard GridView navigation unchanged.
+    header: Item {
+        width: pcGrid.width
+        height: pcGrid.count > 0 ? (pcGrid.width < 600 ? 126 : 108) : 0
+        visible: pcGrid.count > 0
+
+        Column {
+            anchors.left: parent.left
+            anchors.leftMargin: 24
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 22
+            spacing: 8
+
+            Label {
+                text: qsTr("YOUR COMPUTERS · %1").arg(pcGrid.count)
+                font.pixelSize: 12
+                font.bold: true
+                font.letterSpacing: 2
+                color: "#818CF8"
+            }
+            Label {
+                text: qsTr("Your streaming workspace")
+                font.pixelSize: 24
+                font.weight: Font.DemiBold
+                color: "#E2E8F0"
+                elide: Text.ElideRight
+                width: parent.width
+            }
+            Label {
+                text: qsTr("Open a host for apps. Profile saves its quality settings; Display chooses its monitor.")
+                font.pixelSize: 13
+                color: "#94A3B8"
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+        }
     }
 
     Row {
@@ -108,18 +230,42 @@ CenteredGridView {
     model: computerModel
 
     delegate: NavigableItemDelegate {
-        width: 300; height: 320;
+        width: pcGrid.cellWidth - 12
+        height: pcGrid.cellHeight - 12
         grid: pcGrid
 
         property alias pcContextMenu : pcContextMenuLoader.item
 
+        Rectangle {
+            id: availabilityBadge
+            anchors.top: parent.top
+            anchors.topMargin: 20
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            width: availabilityText.implicitWidth + 24
+            height: 28
+            radius: 14
+            color: model.statusUnknown ? "#1E293B" : (model.online ? "#123C35" : "#38232B")
+            border.color: model.statusUnknown ? "#475569" : (model.online ? "#166954" : "#6F3642")
+
+            Label {
+                id: availabilityText
+                anchors.centerIn: parent
+                text: model.statusUnknown ? qsTr("Checking") : (model.online ? qsTr("Online") : qsTr("Offline"))
+                color: model.statusUnknown ? "#CBD5E1" : (model.online ? "#86EFAC" : "#FDA4AF")
+                font.pixelSize: 12
+                font.bold: true
+            }
+        }
+
         Image {
             id: pcIcon
             anchors.horizontalCenter: parent.horizontalCenter
+            y: 65
             source: "qrc:/res/desktop_windows-48px.svg"
             sourceSize {
-                width: 200
-                height: 200
+                width: 110
+                height: 110
             }
         }
 
@@ -152,13 +298,58 @@ CenteredGridView {
             id: pcNameText
             text: model.name
 
-            width: parent.width
+            width: parent.width - 40
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: pcIcon.bottom
-            anchors.bottom: parent.bottom
-            font.pointSize: 36
+            anchors.topMargin: 12
+            height: 48
+            font.pixelSize: 25
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             elide: Text.ElideRight
+        }
+
+        Label {
+            id: hostStatus
+            anchors.top: pcNameText.bottom
+            anchors.topMargin: 2
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - 32
+            text: model.statusUnknown ? qsTr("Checking host availability…") :
+                  !model.online ? (model.wakeable ? qsTr("Offline — Wake PC is available") : qsTr("Host offline — check connection")) :
+                  !model.paired ? qsTr("Pair this computer to continue") :
+                                  qsTr("Ready · %1").arg(model.profileSummary)
+            color: "#94A3B8"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+
+        Button {
+            anchors.left: parent.left
+            anchors.leftMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            focusPolicy: Qt.NoFocus
+            text: qsTr("Profile…")
+            font.pixelSize: 12
+            onClicked: hostProfileDialog.edit(computerModel.profileForComputer(index))
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Set streaming quality for this PC (P key)")
+        }
+
+        Button {
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            visible: model.online && model.paired
+            focusPolicy: Qt.NoFocus // Card remains the keyboard/gamepad focus target
+            text: qsTr("Display…")
+            font.pixelSize: 12
+            onClicked: computerModel.chooseMonitorForComputer(index)
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Choose a physical or virtual monitor for this host (D key)")
         }
 
         Loader {
@@ -175,9 +366,7 @@ CenteredGridView {
                 NavigableMenuItem {
                     text: qsTr("View All Apps")
                     onTriggered: {
-                        var component = Qt.createComponent("AppView.qml")
-                        var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name, "showHiddenGames": true})
-                        stackView.push(appView)
+                        pcGrid.selectHost(index, model.name, true)
                     }
                     visible: model.online && model.paired
                 }
@@ -192,6 +381,11 @@ CenteredGridView {
                         computerModel.testConnectionForComputer(index)
                         testConnectionDialog.open()
                     }
+                }
+
+                NavigableMenuItem {
+                    text: qsTr("Streaming profile…")
+                    onTriggered: hostProfileDialog.edit(computerModel.profileForComputer(index))
                 }
 
                 NavigableMenuItem {
@@ -234,10 +428,8 @@ CenteredGridView {
                     errorDialog.open()
                 }
                 else if (model.paired) {
-                    // go to game view
-                    var component = Qt.createComponent("AppView.qml")
-                    var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name})
-                    stackView.push(appView)
+                    // Verify host access before entering the app grid.
+                    pcGrid.selectHost(index, model.name, false)
                 }
                 else {
                     var pin = computerModel.generatePinString()
@@ -274,6 +466,18 @@ CenteredGridView {
             }
         }
 
+        // Keyboard alternative to the Display button; controller users can
+        // use the existing context menu to reach the same action.
+        Keys.onPressed: {
+            if (event.key === Qt.Key_D && model.online && model.paired) {
+                computerModel.chooseMonitorForComputer(index)
+                event.accepted = true
+            } else if (event.key === Qt.Key_P) {
+                hostProfileDialog.edit(computerModel.profileForComputer(index))
+                event.accepted = true
+            }
+        }
+
         Keys.onMenuPressed: {
             // We must use open() here so the menu is positioned on
             // the ItemDelegate and not where the mouse cursor is
@@ -293,6 +497,63 @@ CenteredGridView {
         // Using Setup-Guide here instead of Troubleshooting because it's likely that users
         // will arrive here by forgetting to enable GameStream or not forwarding ports.
         helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide"
+    }
+
+    NavigableMessageDialog {
+        id: hostAuthWaitDialog
+        objectName: "hostAuthWaitDialog"
+        title: qsTr("Checking host access")
+        text: qsTr("Checking whether this computer requires two-factor verification…")
+        showSpinner: true
+        standardButtons: Dialog.Cancel
+        closePolicy: Popup.NoAutoClose
+        onRejected: pcGrid.cancelHostSelection()
+    }
+
+    NavigableDialog {
+        id: hostTwoFactorDialog
+        objectName: "hostTwoFactorDialog"
+        title: qsTr("Two-factor code")
+        property string message
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+        onOpened: {
+            hostTwoFactorCode.text = ""
+            hostTwoFactorCode.forceActiveFocus()
+        }
+        onRejected: pcGrid.cancelHostSelection()
+        onAccepted: {
+            var code = hostTwoFactorCode.text.trim()
+            hostTwoFactorCode.text = ""
+            if (!code) {
+                message = qsTr("Enter a code from your authenticator or a backup code.")
+                Qt.callLater(function() { if (pcGrid.hostAuthPending) hostTwoFactorDialog.open() })
+                return
+            }
+            if (pcGrid.hostAuthPending && pcGrid.hostAuthIndex >= 0) {
+                hostAuthWaitDialog.open()
+                computerModel.checkTwoFactorForComputer(pcGrid.hostAuthIndex, code)
+            }
+        }
+        Column {
+            spacing: 12
+            width: 380
+            Label {
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: hostTwoFactorDialog.message
+            }
+            TextField {
+                id: hostTwoFactorCode
+                objectName: "hostTwoFactorCode"
+                width: parent.width
+                maximumLength: 16
+                echoMode: TextInput.Password
+                inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                placeholderText: qsTr("123456")
+                onAccepted: hostTwoFactorDialog.accept()
+            }
+        }
     }
 
     NavigableMessageDialog {
@@ -351,6 +612,11 @@ CenteredGridView {
             // Stop showing the spinner and show the image instead
             showSpinner = false
         }
+    }
+
+    HostProfileDialog {
+        id: hostProfileDialog
+        profileModel: computerModel
     }
 
     NavigableDialog {

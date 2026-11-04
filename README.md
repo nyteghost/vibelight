@@ -4,6 +4,32 @@ Vibelight is a fork of [Moonlight PC](https://github.com/moonlight-stream/moonli
 
 > **This is an unofficial fork.** It is not affiliated with or endorsed by the Moonlight project. Please don't report problems with this fork to the upstream project. Upstream is licensed under GPLv3, and so is this fork (see [LICENSE](LICENSE)).
 
+## Vibelight TV — NVIDIA Shield TV Pro beta
+
+The Android TV client lives in [`android-tv/`](android-tv/README.md), independently
+of the Windows/Qt application. It has a native dark TV dashboard, paired game tiles,
+local discovery/manual IP, streaming profiles and the pinned Moonlight Android
+MediaCodec/audio/input foundation. The starting target is **4K60 HEVC at 50 Mbps**
+on wired Ethernet, with H.264 fallback and conditional opt-in HDR10.
+
+- **Download:** [TV beta prereleases](https://github.com/nyteghost/vibelight/releases).
+  Choose a `Vibelight TV Beta tv-beta-N` release and its arm64 APK. From TV 0.2.0,
+  **Updates → Check for beta updates** downloads/verifies a newer beta and opens
+  Android's installation prompt. One manual update enables this feature.
+  [Actions ZIP artifacts](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml) remain available.
+- **Install, pair, update and troubleshoot:** [Shield TV guide](android-tv/docs/SHIELD_GUIDE.md).
+- **Architecture and compatibility:** [Android TV ADR](android-tv/docs/ARCHITECTURE.md).
+- **What is finished / still open:** [TV roadmap](android-tv/docs/ROADMAP.md),
+  [changelog](android-tv/CHANGELOG.md), [Obsidian note](android-tv/docs/OBSIDIAN.md).
+
+This is an unofficial GPLv3 Moonlight Android derivative with its own beta package
+identity. It coexists with Moonlight and does not replace the installed Vibebeam
+host. Physical Shield 4K60/HDR/input/audio/cleanup tests remain required; CI and
+emulator results do not prove streaming performance. PyroWave, live automatic
+bitrate changes, automatic health rollback and automatic reconnect are not included.
+Debug-signed beta updates require a matching signing certificate; see the guide.
+All TV development stays on `beta/next-features-20261028` until explicitly approved.
+
 ## Quick start
 1. Download the latest build (see [Downloads](#downloads)) and unzip it. Add an empty file named `portable.dat` next to `Vibelight.exe` if you want settings kept in that folder.
 2. Pair with your host the same way as in Moonlight and start a stream.
@@ -42,7 +68,7 @@ While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Al
 - **Host info:** the open menu's header shows the PC name, stream resolution and frame rate, and codec (for example `DESKTOP-PC  |  1920x1080@60  |  HEVC 10-bit`) when there is room.
 - **Screenshot of stream (Windows):** saves a PNG of the stream window to `Pictures\Vibelight`. The menu and graph hide first so they aren't in the picture. It copies what is on screen, so exclusive fullscreen or protected video can come out black.
 - **Latency graph (Windows):** a small click-through panel in the bottom-left corner with the last 60 seconds of round-trip time (blue line) and dropped frames (red bars). Toggle it from the menu; it is off by default.
-- **Check connection:** watches the stream for 10 seconds, reports how many frames the network dropped, and suggests a bitrate: lower if frames are being lost, higher if the connection is clean and the stream is using all the bitrate it's given, otherwise "good fit". This measures your real stream rather than running a speed test, so run it while something on screen is moving. The suggestion is saved, and Settings shows "Your last connection check suggested N Mbps" with a **Use** button under the bitrate slider.
+- **Run streaming check:** observes the stream for ten seconds and exports a redacted diagnostic ZIP. Choose remote/home LAN context, then use **Open diagnostic reports** and **Copy troubleshooting prompt**. It never applies bitrate changes. See the [streaming check guide](docs/STREAMING_CHECK.md) for measured fields, privacy, older-host behavior and manual checks.
 
 **Notes and limitations**
 - The button is available on Windows, macOS and X11. It is not shown on Wayland, KMS/DRM or Steam Link. Set the environment variable `ML_DISABLE_SHORTCUT_MENU` to turn it off.
@@ -51,7 +77,7 @@ While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Al
 - This feature is new and has had limited testing, especially in exclusive fullscreen.
 
 ### Auto-reconnect
-If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 3 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
+If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 5 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
 
 ### Custom shortcuts
 Click **Edit custom shortcuts...** in the dropdown (or edit the file yourself) to add your own buttons. The file is `vibelight-shortcuts.json`. It lives in the app's config folder, or next to `Vibelight.exe` in portable mode. It is created the first time you open the menu. Changes show up the next time you press Ctrl+Alt+Shift+H, with no restart.

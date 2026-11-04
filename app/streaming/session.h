@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include "streamcheckreport.h"
 #include <QtGlobal>
 #include <QMutex>
 #include <QWaitCondition>
@@ -158,9 +159,14 @@ public:
     void setShouldExit(bool quitHostApp = false);
 
     void toggleShortcutMenu();
+    // Trigger the nonblocking confirmation without waiting five hours.
+    void requestIdlePromptTest() { m_TestIdlePrompt = true; }
 
     // Used by the shortcut menu's connection check
     bool getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot);
+
+    QJsonObject streamCheckContext() const;
+    std::shared_ptr<vibelight::CheckExportState> exportStreamingCheck(QJsonObject report);
 
     // "PC name  |  1920x1080@60  |  HEVC 10-bit", shown in the shortcut menu
     std::string getStreamSummary() const;
@@ -172,6 +178,13 @@ public:
     // Drag-and-drop: send a file dropped on the stream window to the host in the background.
     // The newest status line ("Sending a.txt...", "Sent a.txt") is picked up by the stream loop.
     void queueFileUpload(const QString& path);
+    // Download the newest host-shared file to Downloads/Vibelight on a worker.
+    void startDownloadNewestHostFile();
+    void startDownloadHostFile(const QString& name);
+    void requestHostFileList();
+    bool takeHostFileList(QStringList& files, QString& error);
+    void cancelFileTransfers();
+    QString transferProgressText();
     bool takeUploadMessage(std::string& message, unsigned int& durationMs);
 
     // Clipboard sync without blocking the stream loop: the request runs on a worker thread and
@@ -347,6 +360,17 @@ private:
         QMutex lock;
         QStringList queue;
         bool running = false;
+        bool downloadBusy = false;
+        bool fileListBusy = false;
+        bool fileListReady = false;
+        QStringList availableFiles;
+        QString fileListError;
+        std::atomic<bool> uploadCancel {false};
+        std::atomic<bool> downloadCancel {false};
+        std::atomic<int> uploadPercent {-1};
+        std::atomic<int> downloadPercent {-1};
+        QString activeUploadName;
+        QString activeDownloadName;
         bool messageReady = false;
         std::string message;
         unsigned int messageMs = 0;
@@ -386,6 +410,7 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    bool m_TestIdlePrompt = false;
 
     bool m_AsyncConnectionSuccess;
 

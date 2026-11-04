@@ -1,5 +1,7 @@
 #include "streamingpreferences.h"
 #include "utils.h"
+#include "hostprofilestore.h"
+#include <QMetaProperty>
 
 #include <QSettings>
 #include <QTranslator>
@@ -107,6 +109,7 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 void StreamingPreferences::reload()
 {
     QSettings settings;
+    m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
 
     int defaultVer = settings.value(SER_DEFAULTVER, 0).toInt();
 
@@ -323,8 +326,45 @@ QString StreamingPreferences::getSuffixFromLanguage(StreamingPreferences::Langua
     }
 }
 
+StreamingPreferences* StreamingPreferences::cloneForSession() const
+{
+    auto snapshot = new StreamingPreferences(nullptr);
+    const auto meta = metaObject();
+    for (int i = meta->propertyOffset(); i < meta->propertyCount(); ++i) {
+        const auto property = meta->property(i);
+        if (property.isReadable() && property.isWritable()) {
+            property.write(snapshot, property.read(this));
+        }
+    }
+    // These are the only non-Q_PROPERTY preference values.
+    snapshot->packetSize = packetSize;
+    snapshot->recommendedFullScreenMode = recommendedFullScreenMode;
+    snapshot->m_SessionAdaptiveBitrate = m_SessionAdaptiveBitrate;
+    snapshot->m_IsSessionSnapshot = true;
+    return snapshot;
+}
+
+StreamingPreferences* StreamingPreferences::forHost(const QString& uuid) const
+{
+    auto snapshot = cloneForSession();
+    QSettings settings;
+    // The live adaptive toggle is saved separately by SettingsView.
+    snapshot->m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
+    const auto stored = vibelight::readHostProfile(settings, uuid);
+    if (stored.valid) {
+        snapshot->width = stored.profile.width;
+        snapshot->height = stored.profile.height;
+        snapshot->fps = stored.profile.fps;
+        snapshot->bitrateKbps = stored.profile.bitrateKbps;
+        snapshot->autoAdjustBitrate = false; // A profile bitrate is an explicit ceiling.
+        snapshot->m_SessionAdaptiveBitrate = stored.profile.adaptiveBitrate;
+    }
+    return snapshot;
+}
+
 void StreamingPreferences::save()
 {
+    if (m_IsSessionSnapshot) return; // Session fallbacks must never overwrite global defaults.
     QSettings settings;
 
     settings.setValue(SER_WIDTH, width);

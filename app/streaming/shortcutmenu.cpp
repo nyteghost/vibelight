@@ -1,4 +1,6 @@
 #include "shortcutmenu.h"
+#include "streamcheckmetrics.h"
+#include <QFileInfo>
 #include "streaming/input/input.h"
 #include "path.h"
 
@@ -455,7 +457,20 @@ void ShortcutMenu::buildItems()
     client(PageVibelight, "System key capture",       "K", SdlInputHandler::KeyComboToggleKeyboardGrab, false);
 
     // Tools & session
-    special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
+    special(PageTools, "Run streaming check", "10 s, observe and export ZIP", KindConnectionCheck);
+    special(PageTools, "Cancel streaming check", "stop sampling", KindCheckCancel);
+    special(PageTools, m_CheckScope == 1 ? "Network: remote" : m_CheckScope == 2 ? "Network: home LAN" : "Network: unspecified", "click to change test context", KindCheckScope);
+    special(PageTools, "Open diagnostic reports", "Downloads / Vibelight / Diagnostics", KindCheckOpen);
+    special(PageTools, "Copy troubleshooting prompt", "paste with the exported ZIP", KindCheckCopy);
+    special(PageTools, "Preview bitrate notification", "test notification position", KindPreviewBitrate);
+    special(PageTools, "Test 30-minute idle prompt", "disconnects if unanswered", KindPreviewIdlePrompt);
+    special(PageTools, "Download newest host file", "Downloads/Vibelight", KindDownloadHostFile);
+    special(PageTools, "Browse host files", "choose a shared file", KindBrowseHostFiles);
+    const QString transferStatus = Session::get() ? Session::get()->transferProgressText() : QString();
+    if (!transferStatus.isEmpty()) {
+        special(PageTools, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
     if (!Session::isSecondaryWindow()) {
         special(PageTools, "Open second monitor window", "Remote Monitor", KindSecondWindow);
     }
@@ -472,6 +487,48 @@ void ShortcutMenu::buildItems()
     m_Items.back().target = 0;
     special(PageTyping, "Key presses", "terminals, Linux hosts", KindSetTyping);
     m_Items.back().target = 1;
+
+    // The share browser is intentionally bounded: eight items per page
+    // prevents the floating menu from extending beyond small stream windows.
+    m_PageTitles[PageHostFiles].push_back("Host shared files (Downloads/Vibelight)");
+    special(PageHostFiles, "Refresh host file list", "recheck the host", KindRefreshHostFiles);
+    if (m_HostFilesLoading || !m_HostFileError.isEmpty() || m_HostFiles.isEmpty()) {
+        Item info;
+        info.kind = KindInfo;
+        info.label = m_HostFilesLoading ? "Loading host files..." :
+                     !m_HostFileError.isEmpty() ? m_HostFileError.left(70).toStdString() :
+                     "No host files found";
+        info.page = PageHostFiles;
+        info.column = 0;
+        info.clientCombo = -1;
+        info.dangerous = false;
+        m_Items.push_back(info);
+    }
+    else {
+        const int pageSize = 8;
+        const int start = m_HostFilesPage * pageSize;
+        for (int n = start; n < qMin(m_HostFiles.size(), start + pageSize); ++n) {
+            Item file;
+            const QString name = m_HostFiles.at(n);
+            file.kind = KindHostFileItem;
+            file.label = name.size() > 49 ? (name.left(46) + "...").toStdString() : name.toStdString();
+            file.hint = "download";
+            file.text = name.toStdString();
+            file.page = PageHostFiles;
+            file.column = 0;
+            file.clientCombo = -1;
+            file.dangerous = false;
+            m_Items.push_back(file);
+        }
+        if (m_HostFilesPage > 0)
+            special(PageHostFiles, "Previous files", "previous 8", KindHostFilesPrevious);
+        if ((m_HostFilesPage + 1) * pageSize < m_HostFiles.size())
+            special(PageHostFiles, "More files", "next 8", KindHostFilesNext);
+    }
+    if (!transferStatus.isEmpty()) {
+        special(PageHostFiles, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
 
     // Displays & windows: display and multi-monitor shortcuts sent to the remote PC
     // (0x50 = P, 0x25 = Left arrow, 0x27 = Right arrow, 0x42 = B)
@@ -850,7 +907,8 @@ void ShortcutMenu::addCategoryRows(bool hasTopColumn)
 
 int ShortcutMenu::parentPage(int page)
 {
-    return page == PageTyping ? PageVibelight : PageRoot;
+    return page == PageTyping ? PageVibelight :
+           page == PageHostFiles ? PageTools : PageRoot;
 }
 
 bool ShortcutMenu::currentTypeAsKeys() const
@@ -981,6 +1039,34 @@ void ShortcutMenu::tick()
 {
     pollClipboard();
 
+    if (Session* session = Session::get()) {
+        QStringList hostFiles;
+        QString hostError;
+        if (session->takeHostFileList(hostFiles, hostError)) {
+            m_HostFiles = hostFiles;
+            m_HostFileError = hostError;
+            m_HostFilesLoading = false;
+            m_HostFilesPage = 0;
+            if (m_Expanded && m_Page == PageHostFiles) {
+                rebuildItems();
+                goToPage(PageHostFiles);
+            }
+        }
+        // Redraw at most once per second while displaying live transfer progress.
+        const unsigned int now = SDL_GetTicks();
+        if (m_Expanded && (m_Page == PageTools || m_Page == PageHostFiles) &&
+            static_cast<int>(now - m_NextTransferRefresh) >= 0) {
+            m_NextTransferRefresh = now + 1000;
+            const QString status = session->transferProgressText();
+            if (status.toStdString() != m_LastTransferProgress) {
+                m_LastTransferProgress = status.toStdString();
+                const int page = m_Page;
+                rebuildItems();
+                goToPage(page);
+            }
+        }
+    }
+
 #ifdef Q_OS_WIN32
     if (m_ScreenshotSaveState) {
         bool finished = false;
@@ -1016,6 +1102,18 @@ void ShortcutMenu::tick()
             updateGraphWindow();
         }
         sampleGraph();
+    }
+
+    if (m_CheckExport) {
+        bool done;
+        QString path;
+        { QMutexLocker locker(&m_CheckExport->lock); done = m_CheckExport->done; path = m_CheckExport->path; }
+        if (done) {
+            m_CheckExport.reset();
+            m_CheckReportPath = path;
+            showTransient(path.isEmpty() ? "Couldn't save streaming report. Check Downloads permissions and disk space" :
+                          "Report saved. Tools > Open diagnostic reports; Copy troubleshooting prompt", 12000);
+        }
     }
 
     if (m_CheckActive && (int)(SDL_GetTicks() - m_CheckEndsAt) >= 0) {
@@ -1055,86 +1153,68 @@ std::string ShortcutMenu::elapsedString() const
 
 void ShortcutMenu::startConnectionCheck()
 {
-    Session* session = Session::get();
-    CONNECTION_SNAPSHOT snapshot = {};
-    if (session == nullptr || !session->getConnectionSnapshot(snapshot)) {
-        showTransient("Connection check isn't available for this stream", 4000);
+    if (m_CheckActive || m_CheckExport) {
+        showTransient("A streaming check is already running", 4000);
         return;
     }
-
+    Session* session = Session::get();
+    if (!session) return;
+    CONNECTION_SNAPSHOT snapshot = {};
+    m_CheckContext = session->streamCheckContext();
+    m_CheckContext["network_scope"] = m_CheckScope == 1 ? "remote_user_selected" : m_CheckScope == 2 ? "home_lan_user_selected" : "unspecified";
+    m_CheckHaveStart = session->getConnectionSnapshot(snapshot);
     m_CheckStartFrames = snapshot.totalFrames;
     m_CheckStartDropped = snapshot.networkDroppedFrames;
     m_CheckStartDecoded = snapshot.decodedFrames;
     m_CheckStartPacerDropped = snapshot.pacerDroppedFrames;
     m_CheckStartDecodeUs = snapshot.totalDecodeTimeUs;
-    m_CheckEndsAt = SDL_GetTicks() + 10000;
+    m_CheckStartedAt = SDL_GetTicks();
+    m_CheckEndsAt = m_CheckStartedAt + 10000;
     m_CheckActive = true;
-    showTransient("Checking connection for 10 s...", 12000);
+    showTransient("Observing stream for 10 s; settings stay unchanged. Tools > Cancel to stop", 12000);
 }
 
 void ShortcutMenu::finishConnectionCheck()
 {
     m_CheckActive = false;
-
     Session* session = Session::get();
+    if (!session) return;
     CONNECTION_SNAPSHOT snapshot = {};
-    if (session == nullptr || !session->getConnectionSnapshot(snapshot)) {
-        showTransient("Connection check failed", 4000);
-        return;
+    const bool available = m_CheckHaveStart && session->getConnectionSnapshot(snapshot);
+    const auto elapsed = static_cast<unsigned int>(SDL_GetTicks() - m_CheckStartedAt);
+    const auto metrics = vibelight::checkMetrics(
+        {m_CheckStartFrames, m_CheckStartDropped, m_CheckStartDecoded, m_CheckStartPacerDropped, m_CheckStartDecodeUs},
+        {snapshot.totalFrames, snapshot.networkDroppedFrames, snapshot.decodedFrames, snapshot.pacerDroppedFrames, snapshot.totalDecodeTimeUs}, elapsed);
+    const bool valid = available && metrics.countersValid;
+    QJsonObject report{{"schema", 1}, {"kind", "passive_streaming_check"},
+        {"created_utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+        {"elapsed_ms", static_cast<double>(elapsed)}, {"stream_at_start", m_CheckContext},
+        {"stream_at_end", session->streamCheckContext()},
+        {"collection_status", valid && metrics.sufficientVideo ? "passed" : "inconclusive"},
+        {"controller_to_screen_latency", QJsonValue()}, {"packet_loss_percent", QJsonValue()},
+        {"network_jitter_ms", QJsonValue()}, {"host_applied_bitrate_kbps", QJsonValue()},
+        {"actual_encoder_implementation", QJsonValue()}};
+    QJsonObject measured;
+    if (valid) {
+        measured["incoming_frame_rate_including_missing_frames"] = metrics.observedFps;
+        measured["network_dropped_frame_percent"] = metrics.networkDropPercent;
+        if (metrics.decodeAvailable) {
+            measured["mean_decode_ms"] = metrics.decodeMs;
+            measured["pacer_dropped_frame_percent"] = metrics.pacerDropPercent;
+        }
+        if (snapshot.rttMs > 0) {
+            measured["latest_rtt_ms"] = static_cast<double>(snapshot.rttMs);
+            measured["latest_rtt_variance_ms"] = static_cast<double>(snapshot.rttVarianceMs);
+        }
+        if (std::isfinite(snapshot.videoMbps) && snapshot.videoMbps > 0) measured["recent_received_video_mbps"] = snapshot.videoMbps;
     }
-
-    unsigned int frames = snapshot.totalFrames - m_CheckStartFrames;
-    unsigned int dropped = snapshot.networkDroppedFrames - m_CheckStartDropped;
-    if (frames < 120) {
-        // The stream was paused, minimized or too idle for a meaningful result
-        showTransient("Not enough video to judge. Try again while something is moving", 6000);
-        return;
-    }
-
-    double dropPercent = 100.0 * dropped / frames;
-    double currentMbps = session->getConfiguredBitrateKbps() / 1000.0;
-    vibelight::ConnectionSample sample;
-    sample.currentMbps = currentMbps;
-    sample.receivedMbps = snapshot.videoMbps;
-    sample.dropPercent = dropPercent;
-    sample.rttMs = snapshot.rttMs;
-    sample.rttVarianceMs = snapshot.rttVarianceMs;
-    unsigned int decoded = snapshot.decodedFrames - m_CheckStartDecoded;
-    if (decoded > 0) {
-        sample.avgDecodeMs = (snapshot.totalDecodeTimeUs - m_CheckStartDecodeUs) / 1000.0 / decoded;
-        sample.pacerDropPercent = 100.0 * (snapshot.pacerDroppedFrames - m_CheckStartPacerDropped) / decoded;
-    }
-    sample.fps = session->getStreamFps();
-    const vibelight::BitrateAdvice advice = vibelight::analyzeConnection(sample);
-    const double suggestedMbps = advice.mbps;
-
-    char buf[200];
-    if (advice.bottleneck == vibelight::Bottleneck::Decoder) {
-        SDL_snprintf(buf, sizeof(buf), "This PC is the limit (%.0f ms decode, %.1f%% late). A lower resolution, frame rate or codec will help more than bitrate",
-                     sample.avgDecodeMs, sample.pacerDropPercent);
-    }
-    else if (advice.bottleneck == vibelight::Bottleneck::Jitter) {
-        SDL_snprintf(buf, sizeof(buf), "Connection is unsteady (ping varies by %u ms). Try %d Mbps (now %d)",
-                     snapshot.rttVarianceMs, (int)suggestedMbps, (int)(currentMbps + 0.5));
-    }
-    else if (dropPercent >= 1.0) {
-        SDL_snprintf(buf, sizeof(buf), "Dropping %.1f%% of frames. Try %d Mbps (now %d)",
-                     dropPercent, (int)suggestedMbps, (int)(currentMbps + 0.5));
-    }
-    else if (suggestedMbps > currentMbps + 0.5) {
-        SDL_snprintf(buf, sizeof(buf), "Connection is clean (%.1f%% dropped). Could try %d Mbps (now %d)",
-                     dropPercent, (int)suggestedMbps, (int)(currentMbps + 0.5));
-    }
-    else {
-        SDL_snprintf(buf, sizeof(buf), "Connection OK (%.1f%% dropped). %d Mbps is a good fit",
-                     dropPercent, (int)(currentMbps + 0.5));
-    }
-
-    // Remember the suggestion so the Settings page can offer it
-    QSettings settings;
-    settings.setValue("vibelight/suggestedBitrateKbps", (int)suggestedMbps * 1000);
-
-    showTransient(buf, 10000);
+    report["measured"] = measured;
+    report["manual_checks"] = QJsonObject{{"cursor_visibility_and_alignment", "needs_confirmation"},
+        {"audio_audibility_and_sync", "needs_confirmation"}, {"display_restoration_after_disconnect", "needs_confirmation"},
+        {"original_audio_output_after_disconnect", "needs_confirmation"}};
+    report["limitations"] = "Collection passed means usable samples, not certified stream quality. Counters are published about once per second. RTT is a latest estimate; variance is not packet jitter. Missing metrics are unknown. Host capture observations may be shared by multiple sessions. No performance benchmark or physical cleanup verdict is inferred.";
+    m_CheckExport = session->exportStreamingCheck(report);
+    showTransient("Sampling complete; collecting host observations and saving redacted ZIP...", 8000);
 }
 
 void ShortcutMenu::showHint()
@@ -1544,12 +1624,83 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindBrowseHostFiles || item.kind == KindRefreshHostFiles) {
+        if (Session* session = Session::get()) {
+            m_HostFiles.clear();
+            m_HostFileError.clear();
+            m_HostFilesLoading = true;
+            m_HostFilesPage = 0;
+            session->requestHostFileList();
+            m_Page = PageHostFiles;
+            rebuildItems();
+            goToPage(PageHostFiles);
+        }
+        return;
+    }
+    if (item.kind == KindHostFilesNext || item.kind == KindHostFilesPrevious) {
+        m_HostFilesPage += item.kind == KindHostFilesNext ? 1 : -1;
+        m_HostFilesPage = qBound(0, m_HostFilesPage, qMax(0, (m_HostFiles.size() - 1) / 8));
+        rebuildItems();
+        goToPage(PageHostFiles);
+        return;
+    }
+
     // Hide the button and give focus (and mouse capture, if we took it) back before
     // acting so that the action sees the same state the user had.
     dismiss(true);
+    if (item.kind == KindHostFileItem) {
+        if (Session::get()) Session::get()->startDownloadHostFile(QString::fromStdString(item.text));
+        return;
+    }
+    if (item.kind == KindCancelTransfer) {
+        if (Session::get()) Session::get()->cancelFileTransfers();
+        return;
+    }
+
+    if (item.kind == KindCheckCancel) {
+        m_CheckActive = false;
+        showTransient(m_CheckExport ? "Report export is already finishing (host timeout: 5 s)" : "Streaming check sampling canceled", 4000);
+        return;
+    }
+    if (item.kind == KindCheckScope) {
+        if (m_CheckActive || m_CheckExport) { showTransient("Finish or cancel the current check first", 4000); return; }
+        m_CheckScope = (m_CheckScope + 1) % 3;
+        rebuildItems();
+        showTransient(m_CheckScope == 1 ? "Test context: remote (work to home)" : m_CheckScope == 2 ? "Test context: home LAN" : "Test context: unspecified", 4000);
+        return;
+    }
+    if (item.kind == KindCheckCopy) {
+        const auto text = vibelight::checkPrompt().toUtf8();
+        showTransient(SDL_SetClipboardText(text.constData()) == 0 ? "Troubleshooting prompt copied. Attach the redacted ZIP" : "Couldn't copy prompt", 5000);
+        return;
+    }
+    if (item.kind == KindCheckOpen) {
+        const auto folder = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation) + "/Vibelight/Diagnostics";
+        showTransient(QDir(folder).exists() && QDesktopServices::openUrl(QUrl::fromLocalFile(folder)) ? "Opened diagnostic reports" : "No saved report folder yet. Run a streaming check first", 5000);
+        return;
+    }
 
     if (item.kind == KindConnectionCheck) {
         startConnectionCheck();
+        return;
+    }
+
+    if (item.kind == KindPreviewBitrate) {
+        const int position = QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt();
+        showTransient("Bitrate notification preview (position test)", 4500,
+                      position == 1 ? TransientPlacement::BottomRight : TransientPlacement::TopCenter);
+        return;
+    }
+
+    if (item.kind == KindPreviewIdlePrompt) {
+        if (Session::get() != nullptr) Session::get()->requestIdlePromptTest();
+        return;
+    }
+
+    if (item.kind == KindDownloadHostFile) {
+        if (Session::get() != nullptr) {
+            Session::get()->startDownloadNewestHostFile();
+        }
         return;
     }
 
@@ -1557,7 +1708,7 @@ void ShortcutMenu::execute(const Item& itemRef)
         Session* session = Session::get();
         QString error;
         if (session != nullptr && session->openSecondMonitorWindow(error)) {
-            showTransient("Opening the second monitor window...", 5000);
+            showTransient(error.isEmpty() ? "Opening the second monitor window..." : error.toStdString(), 5000);
         }
         else {
             showTransient(error.isEmpty() ? std::string("Couldn't open the second window") : error.toStdString(), 6000);

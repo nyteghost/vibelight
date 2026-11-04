@@ -1,0 +1,3 @@
+module Session
+Session 1.0 Session.qml
+singleton SessionTestState 1.0 SessionTestState.qml

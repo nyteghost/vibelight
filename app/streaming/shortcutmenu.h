@@ -77,6 +77,7 @@ private:
         KindOpenConfig, // open the custom shortcuts file in the default editor
         KindSecondWindow,    // open a second Vibelight window with the host's Remote Monitor
         KindCheckCancel, KindCheckScope, KindCheckOpen, KindCheckCopy,
+        KindNetworkCheck, KindApplyNetworkLock, KindUnlockHostBitrate,
         KindConnectionCheck, // measure the stream for 10 seconds and suggest a bitrate
         KindPreviewBitrate, // display the user-chosen bitrate notification location
         KindPreviewIdlePrompt, // test the idle response window
@@ -143,7 +144,7 @@ private:
     void destroyGraphWindow();
     void sampleGraph();
     void renderGraph();
-    void startConnectionCheck();
+    void startConnectionCheck(bool networkTest = false);
     void finishConnectionCheck();
     std::string elapsedString() const;
     void endTransient();
@@ -237,6 +238,9 @@ private:
     // Connection check state
     std::shared_ptr<vibelight::CheckExportState> m_CheckExport;
     QString m_CheckReportPath;
+    bool m_NetworkTest = false;
+    int m_NetworkRecommendation = 0;
+    std::string m_NetworkResult;
     int m_CheckScope = 0; // unspecified, remote, LAN; explicit user choice.
     unsigned int m_CheckStartedAt = 0;
     bool m_CheckHaveStart = false;

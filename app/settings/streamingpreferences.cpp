@@ -340,7 +340,8 @@ StreamingPreferences* StreamingPreferences::cloneForSession() const
     // These are the only non-Q_PROPERTY preference values.
     snapshot->packetSize = packetSize;
     snapshot->recommendedFullScreenMode = recommendedFullScreenMode;
-    snapshot->m_SessionBitrateLocked = QSettings().value("vibelight/bitrateLocked", false).toBool();
+    snapshot->m_SessionBitrateLocked = m_IsSessionSnapshot ? m_SessionBitrateLocked :
+        QSettings().value("vibelight/bitrateLocked", false).toBool();
     snapshot->m_SessionAdaptiveBitrate = m_SessionAdaptiveBitrate;
     snapshot->m_IsSessionSnapshot = true;
     return snapshot;
@@ -352,6 +353,8 @@ StreamingPreferences* StreamingPreferences::forHost(const QString& uuid) const
     QSettings settings;
     // The live adaptive toggle is saved separately by SettingsView.
     snapshot->m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
+    snapshot->m_SessionBitrateLocked = snapshot->m_SessionBitrateLocked ||
+        settings.value("vibelight/hostBitrateLock/" + uuid.toUtf8().toHex(), false).toBool();
     const auto stored = vibelight::readHostProfile(settings, uuid);
     if (stored.valid) {
         snapshot->width = stored.profile.width;

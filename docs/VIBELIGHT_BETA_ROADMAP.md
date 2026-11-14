@@ -256,3 +256,11 @@ See [Streaming check](STREAMING_CHECK.md). Existing host-card 2FA work remains a
 - Added compile-time policy regressions for all lock/adaptation combinations.
 - Windows CI and physical streaming validation pending; live in-stream toggling
   is not part of this increment.
+
+### Network bitrate advisor — November 14, 2026
+
+Implemented a 20-second passive network check, conservative keep/lower target
+advice, explicit per-host Apply-and-lock and unlock actions, and counter/quality
+regressions. Full active client-to-host bandwidth testing needs new authenticated
+host support and remains open. Local policy tests pass; Windows CI and physical
+remote/LAN validation remain pending. No performance improvement is claimed.

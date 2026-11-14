@@ -1,3 +1,4 @@
+#include "networkbitratecheck.h"
 #include "shortcutmenu.h"
 #include "streamcheckmetrics.h"
 #include <QFileInfo>
@@ -457,6 +458,13 @@ void ShortcutMenu::buildItems()
     client(PageVibelight, "System key capture",       "K", SdlInputHandler::KeyComboToggleKeyboardGrab, false);
 
     // Tools & session
+    special(PageTools, "Test network for bitrate", "20 s of moving gameplay", KindNetworkCheck);
+    if (!m_NetworkResult.empty()) special(PageTools, m_NetworkResult, "sample-based advice, not maximum speed", KindInfo);
+    if (m_NetworkRecommendation > 0 && !m_CheckActive) {
+        special(PageTools, "Apply and lock " + std::to_string(m_NetworkRecommendation / 1000.0).substr(0, 5) + " Mbps for this PC", "saved for next connection", KindApplyNetworkLock);
+    }
+    if (Session::get() && Session::get()->hasHostBitrateLock())
+        special(PageTools, "Unlock this PC's bitrate", "next connection; global lock still applies", KindUnlockHostBitrate);
     special(PageTools, "Run streaming check", "10 s, observe and export ZIP", KindConnectionCheck);
     special(PageTools, "Cancel streaming check", "stop sampling", KindCheckCancel);
     special(PageTools, m_CheckScope == 1 ? "Network: remote" : m_CheckScope == 2 ? "Network: home LAN" : "Network: unspecified", "click to change test context", KindCheckScope);
@@ -1151,7 +1159,7 @@ std::string ShortcutMenu::elapsedString() const
     return buf;
 }
 
-void ShortcutMenu::startConnectionCheck()
+void ShortcutMenu::startConnectionCheck(bool networkTest)
 {
     if (m_CheckActive || m_CheckExport) {
         showTransient("A streaming check is already running", 4000);
@@ -1161,6 +1169,13 @@ void ShortcutMenu::startConnectionCheck()
     if (!session) return;
     CONNECTION_SNAPSHOT snapshot = {};
     m_CheckContext = session->streamCheckContext();
+    if (networkTest && (m_CheckContext.value("adaptive_bitrate_requested").toBool() || Session::isSecondaryWindow())) {
+        showTransient("For a stable test, turn off automatic bitrate (including host profile), reconnect, and use the primary window", 12000);
+        return;
+    }
+    m_NetworkTest = networkTest;
+    m_NetworkRecommendation = 0;
+    m_NetworkResult.clear();
     m_CheckContext["network_scope"] = m_CheckScope == 1 ? "remote_user_selected" : m_CheckScope == 2 ? "home_lan_user_selected" : "unspecified";
     m_CheckHaveStart = session->getConnectionSnapshot(snapshot);
     m_CheckStartFrames = snapshot.totalFrames;
@@ -1169,9 +1184,10 @@ void ShortcutMenu::startConnectionCheck()
     m_CheckStartPacerDropped = snapshot.pacerDroppedFrames;
     m_CheckStartDecodeUs = snapshot.totalDecodeTimeUs;
     m_CheckStartedAt = SDL_GetTicks();
-    m_CheckEndsAt = m_CheckStartedAt + 10000;
+    m_CheckEndsAt = m_CheckStartedAt + (networkTest ? 20000 : 10000);
     m_CheckActive = true;
-    showTransient("Observing stream for 10 s; settings stay unchanged. Tools > Cancel to stop", 12000);
+    rebuildItems();
+    showTransient(networkTest ? "Network check: play moving gameplay for 20 s. Settings stay unchanged; Tools > Cancel to stop" : "Observing stream for 10 s; settings stay unchanged. Tools > Cancel to stop", networkTest ? 22000 : 12000);
 }
 
 void ShortcutMenu::finishConnectionCheck()
@@ -1209,6 +1225,19 @@ void ShortcutMenu::finishConnectionCheck()
         if (std::isfinite(snapshot.videoMbps) && snapshot.videoMbps > 0) measured["recent_received_video_mbps"] = snapshot.videoMbps;
     }
     report["measured"] = measured;
+    if (m_NetworkTest) {
+        const auto end = session->streamCheckContext();
+        auto start = m_CheckContext;
+        start.remove("network_scope");
+        const auto advice = vibelight::networkBitrateAdvice(metrics, elapsed,
+            m_CheckContext.value("client_configured_bitrate_kbps").toInt(),
+            m_CheckContext.value("fps").toInt(), valid && end == start);
+        m_NetworkRecommendation = advice.kbps;
+        m_NetworkResult = advice.reason;
+        report["network_bitrate_advice"] = QJsonObject{{"recommended_target_kbps", advice.kbps > 0 ? QJsonValue(advice.kbps) : QJsonValue()},
+            {"reason", advice.reason}, {"method", "passive_stream_sample_not_bandwidth_speedtest"}, {"applied", false}};
+        rebuildItems();
+    }
     report["manual_checks"] = QJsonObject{{"cursor_visibility_and_alignment", "needs_confirmation"},
         {"audio_audibility_and_sync", "needs_confirmation"}, {"display_restoration_after_disconnect", "needs_confirmation"},
         {"original_audio_output_after_disconnect", "needs_confirmation"}};
@@ -1680,6 +1709,19 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindNetworkCheck) {
+        startConnectionCheck(true);
+        return;
+    }
+    if (item.kind == KindApplyNetworkLock || item.kind == KindUnlockHostBitrate) {
+        const int kbps = item.kind == KindUnlockHostBitrate ? 0 : m_NetworkRecommendation;
+        const bool ok = Session::get() && !m_CheckActive &&
+            (item.kind == KindUnlockHostBitrate || kbps > 0) && Session::get()->saveNetworkBitrateLock(kbps);
+        if (ok) m_NetworkRecommendation = 0;
+        rebuildItems();
+        showTransient(ok ? "Saved for next connection. Global bitrate lock, if enabled, still applies" : "Could not save bitrate choice; settings were not confirmed", 9000);
+        return;
+    }
     if (item.kind == KindConnectionCheck) {
         startConnectionCheck();
         return;

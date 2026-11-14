@@ -39,3 +39,31 @@ run in the bounded request path, retaining certificate pinning, response limits,
 and manual redirect handling. CI also syntax-compiles the complete production
 HTTP client in the Qt test job so helper-only tests cannot miss this scope error.
 A successful Windows build and physical streaming validation are still required.
+
+## Network check and host bitrate lock
+
+Tools & session → **Test network for bitrate** observes 20 seconds of actual
+stream traffic. Play a moving game during the sample. Select the remote/home-LAN
+context first. For a consistent baseline, disable automatic bitrate (including
+host-profile adaptation) and reconnect, or enable bitrate lock before reconnecting.
+Use the primary streaming window. Cancel stops sampling without changing settings.
+
+Results appear in Tools & session and in the exported report. With sufficient
+frames and no decoder/pacing bottleneck, low frame loss suggests retaining the
+current target. At 0.2% loss the trial recommendation is 10% lower; at 1% it is
+25% lower, rounded down to 0.5 Mbps with a 0.5 Mbps minimum. These are conservative
+heuristics to test again, not a measured optimal bitrate. Decoder pressure, idle
+streams, changed configuration or invalid counters produce no recommendation.
+
+Choose **Apply and lock X Mbps for this PC** to explicitly save the recommendation
+in this host's profile and lock adaptation for that host on the next connection.
+It does not modify the running stream or other hosts' profiles. Existing profile
+resolution/FPS values are preserved. Without a profile, the current session's
+preference values seed a new one. **Unlock this PC's bitrate** removes this
+host-specific lock on the next connection; the global Settings lock still applies.
+The saved target remains available for manual editing under the host's Profile.
+
+This is a passive network quality check, not a maximum-throughput speed test. It
+does not send synthetic traffic, estimate upload capacity, recommend untested
+higher rates, or certify a best bitrate. Actual host caps remain authoritative.
+An authenticated, bounded active bandwidth test in Vibebeam is still future work.

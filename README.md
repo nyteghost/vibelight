@@ -253,3 +253,12 @@ Host profiles retain their own selected target. Unlocking restores the saved
 automatic-adjustment preference. Changes apply to the next stream, not an
 already-running one. This locks the requested target, not the actual measured
 traffic: encoder behavior and host limits still apply.
+
+### Network check (beta)
+
+During a stream, open **Tools & session → Test network for bitrate**. The
+20-second passive check reports measured quality and, when conclusive, offers
+**Apply and lock X Mbps for this PC** for the next connection. See
+[network check instructions](docs/STREAMING_CHECK.md#network-check-and-host-bitrate-lock).
+This is not a maximum-bandwidth speed test; recommendations are conservative
+trial targets, not proven optimal settings.

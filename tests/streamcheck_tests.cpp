@@ -1,3 +1,4 @@
+#include "streaming/networkbitratecheck.h"
 #include "settings/bitratepolicy.h"
 #include "streaming/streamcheckmetrics.h"
 #include "streaming/diagnosticzip.h"
@@ -6,6 +7,23 @@
 
 int main(int argc, char** argv) {
     using namespace vibelight;
+    CheckMetrics network{true, true, true, 60, 0, 2, 0};
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 50000);
+    network.networkDropPercent = 1.5;
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 37500);
+    network.networkDropPercent = 0.5;
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 45000);
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, false).kbps == 0);
+    assert(networkBitrateAdvice(network, 10000, 50000, 60, true).kbps == 0);
+    network.decodeMs = 20;
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 0);
+    network.decodeMs = 2;
+    network.observedFps = 5;
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 0);
+    network.observedFps = 60;
+    network.networkDropPercent = NAN;
+    assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 0);
+
     const CheckCounters start {100, 2, 90, 1, 90000};
     const CheckCounters end {700, 8, 684, 4, 684000};
     const auto good = checkMetrics(start, end, 10000);

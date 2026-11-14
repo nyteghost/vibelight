@@ -1,3 +1,4 @@
+#include "settings/hostprofilestore.h"
 #include "streamcheckreport.h"
 #include "diagnosticzip.h"
 #include <QSaveFile>
@@ -2651,6 +2652,32 @@ std::string Session::getStreamSummary() const
     return parts.join("  |  ").toStdString();
 }
 
+bool Session::hasHostBitrateLock() const
+{
+    return QSettings().value("vibelight/hostBitrateLock/" + m_Computer->uuid.toUtf8().toHex(), false).toBool();
+}
+
+bool Session::saveNetworkBitrateLock(int kbps)
+{
+    if (isSecondaryWindow() || m_Computer->uuid.isEmpty()) return false;
+    QSettings settings;
+    const auto key = "vibelight/hostBitrateLock/" + m_Computer->uuid.toUtf8().toHex();
+    if (kbps == 0) {
+        settings.remove(key);
+    } else {
+        const auto stored = vibelight::readHostProfile(settings, m_Computer->uuid);
+        if (stored.exists && !stored.valid) return false; // Preserve malformed saved data.
+        auto profile = stored.valid ? stored.profile : vibelight::HostProfile{
+            m_Preferences->width, m_Preferences->height, m_Preferences->fps,
+            m_Preferences->bitrateKbps, m_Preferences->sessionAdaptiveBitrate()};
+        profile.bitrateKbps = kbps;
+        if (!vibelight::writeHostProfile(settings, m_Computer->uuid, profile, true)) return false;
+        settings.setValue(key, true);
+    }
+    settings.sync();
+    return settings.status() == QSettings::NoError;
+}
+
 QJsonObject Session::streamCheckContext() const
 {
     const char* codec = (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_AV1) ? "AV1" :
@@ -2658,6 +2685,8 @@ QJsonObject Session::streamCheckContext() const
                         (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "unknown";
     return {{"codec", codec}, {"width", m_ActiveVideoWidth}, {"height", m_ActiveVideoHeight},
             {"fps", m_ActiveVideoFrameRate}, {"client_configured_bitrate_kbps", m_StreamConfig.bitrate},
+            {"adaptive_bitrate_requested", m_Preferences->sessionAdaptiveBitrate()},
+            {"secondary_window", isSecondaryWindow()},
             {"ten_bit", bool(m_ActiveVideoFormat & VIDEO_FORMAT_MASK_10BIT)}};
 }
 

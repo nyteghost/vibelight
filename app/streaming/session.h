@@ -199,6 +199,8 @@ public:
 
     // Optional automatic bitrate control while streaming; see tickAutoBitrate()
     void tickAutoBitrate();
+    bool saveNetworkBitrateLock(int kbps);
+    bool hasHostBitrateLock() const;
 
     // How "paste as typing" sends text to this PC: Unicode text (default) or key presses.
     // Remembered per PC; PCs that were never set use the older global setting.

@@ -415,7 +415,7 @@ void ShortcutMenu::buildItems()
         item.rect = {0, 0, 0, 0};
         m_Items.push_back(item);
     };
-    auto special = [this](int page, const char* label, const std::string& hint, Kind kind) {
+    auto special = [this](int page, const std::string& label, const std::string& hint, Kind kind) {
         Item item;
         item.label = label;
         item.hint = hint;

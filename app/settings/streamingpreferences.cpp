@@ -109,6 +109,7 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 void StreamingPreferences::reload()
 {
     QSettings settings;
+    m_SessionBitrateLocked = settings.value("vibelight/bitrateLocked", false).toBool();
     m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
 
     int defaultVer = settings.value(SER_DEFAULTVER, 0).toInt();
@@ -339,6 +340,7 @@ StreamingPreferences* StreamingPreferences::cloneForSession() const
     // These are the only non-Q_PROPERTY preference values.
     snapshot->packetSize = packetSize;
     snapshot->recommendedFullScreenMode = recommendedFullScreenMode;
+    snapshot->m_SessionBitrateLocked = QSettings().value("vibelight/bitrateLocked", false).toBool();
     snapshot->m_SessionAdaptiveBitrate = m_SessionAdaptiveBitrate;
     snapshot->m_IsSessionSnapshot = true;
     return snapshot;

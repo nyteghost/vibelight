@@ -242,3 +242,14 @@ for different architectures, which handle building deps and extra linking for yo
 3. Send Pull Requests
 
 Check out our [website](https://moonlight-stream.org) for project links and information.
+
+### Bitrate lock (beta)
+
+In Settings, choose your video bitrate and enable **Lock bitrate (keep the
+selected target)** before starting a stream. This disables automatic adaptation
+even when a host profile enables it, and prevents resolution/FPS/color changes
+from resetting the global bitrate. Manual bitrate changes remain available.
+Host profiles retain their own selected target. Unlocking restores the saved
+automatic-adjustment preference. Changes apply to the next stream, not an
+already-running one. This locks the requested target, not the actual measured
+traffic: encoder behavior and host limits still apply.

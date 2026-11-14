@@ -1,3 +1,4 @@
+#include "settings/bitratepolicy.h"
 #include "streaming/streamcheckmetrics.h"
 #include "streaming/diagnosticzip.h"
 #include <cassert>
@@ -26,3 +27,9 @@ int main(int argc, char** argv) {
         if (!output) return 1;
     }
 }
+
+// Both host-profile and global automatic preferences must yield to the lock.
+static_assert(!vibelight::allowAdaptiveBitrate(false, false));
+static_assert(vibelight::allowAdaptiveBitrate(true, false));
+static_assert(!vibelight::allowAdaptiveBitrate(false, true));
+static_assert(!vibelight::allowAdaptiveBitrate(true, true));

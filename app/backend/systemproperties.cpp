@@ -465,6 +465,16 @@ void SystemProperties::setClipboardAutoSync(bool enabled)
     QSettings().setValue("vibelight/clipboardAutoSync", enabled);
 }
 
+bool SystemProperties::bitrateLocked()
+{
+    return QSettings().value("vibelight/bitrateLocked", false).toBool();
+}
+
+void SystemProperties::setBitrateLocked(bool locked)
+{
+    QSettings().setValue("vibelight/bitrateLocked", locked);
+}
+
 bool SystemProperties::autoBitrate()
 {
     return QSettings().value("vibelight/autoBitrate", false).toBool();

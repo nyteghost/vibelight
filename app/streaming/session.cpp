@@ -1807,7 +1807,7 @@ bool Session::startConnectionAsync()
     // had if the host supported YUV444 (though obviously with 4:2:0 subsampling).
     // If the user has adjusted the bitrate from default, we'll assume they really wanted
     // that value and not second guess them.
-    if (m_Preferences->enableYUV444 &&
+    if (!m_Preferences->sessionBitrateLocked() && m_Preferences->enableYUV444 &&
         !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444) &&
         m_StreamConfig.bitrate == StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
                                                                           m_StreamConfig.height,

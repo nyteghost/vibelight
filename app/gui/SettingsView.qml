@@ -219,7 +219,7 @@ SettingsWorkspace {
                                 StreamingPreferences.width = selectedWidth
                                 StreamingPreferences.height = selectedHeight
 
-                                if (StreamingPreferences.autoAdjustBitrate) {
+                                if (StreamingPreferences.autoAdjustBitrate && !bitrateLockCheck.checked) {
                                     StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
                                                                                                               StreamingPreferences.height,
                                                                                                               StreamingPreferences.fps,
@@ -387,7 +387,7 @@ SettingsWorkspace {
                             if (StreamingPreferences.fps !== selectedFps) {
                                 StreamingPreferences.fps = selectedFps
 
-                                if (StreamingPreferences.autoAdjustBitrate) {
+                                if (StreamingPreferences.autoAdjustBitrate && !bitrateLockCheck.checked) {
                                     StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
                                                                                                               StreamingPreferences.height,
                                                                                                               StreamingPreferences.fps,
@@ -812,6 +812,7 @@ SettingsWorkspace {
 
                     Button {
                         id: resetBitrateButton
+                        enabled: !bitrateLockCheck.checked
                         text: qsTr("Use Default (%1 Mbps)").arg(StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444) / 1000.0)
                         visible: StreamingPreferences.bitrateKbps !== StreamingPreferences.getDefaultBitrate(StreamingPreferences.width, StreamingPreferences.height, StreamingPreferences.fps, StreamingPreferences.enableYUV444)
                         onClicked: {
@@ -848,7 +849,24 @@ SettingsWorkspace {
                 }
 
                 WrappingCheckBox {
+                    id: bitrateLockCheck
+                    width: parent.width
+                    text: qsTr("Lock bitrate (keep the selected target)")
+                    font.pointSize: 12
+                    checked: SystemProperties.bitrateLocked()
+                    onClicked: SystemProperties.setBitrateLocked(checked)
+                }
+
+                Label {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    visible: bitrateLockCheck.checked
+                    text: qsTr("Locked: automatic bitrate changes are disabled, including host-profile adaptive settings. You can still choose a bitrate manually. Host profiles keep their own selected target. Applies to the next stream; host limits and actual traffic may differ.")
+                }
+
+                WrappingCheckBox {
                     id: autoBitrateCheck
+                    enabled: !bitrateLockCheck.checked
                     width: parent.width
                     text: qsTr("Adjust the video bitrate automatically while streaming")
                     font.pointSize: 12
@@ -873,7 +891,7 @@ SettingsWorkspace {
 
                     AutoResizingComboBox {
                         id: autoBitrateNotificationPosition
-                        enabled: autoBitrateCheck.checked
+                        enabled: autoBitrateCheck.checked && !bitrateLockCheck.checked
                         model: [qsTr("Top center"), qsTr("Bottom right")]
                         currentIndex: SystemProperties.autoBitrateNotificationPosition()
                         onActivated: SystemProperties.setAutoBitrateNotificationPosition(currentIndex)
@@ -1874,7 +1892,7 @@ SettingsWorkspace {
                         // This is called on init, so only reset to default bitrate when checked state changes.
                         if (StreamingPreferences.enableYUV444 != checked) {
                             StreamingPreferences.enableYUV444 = checked
-                            if (StreamingPreferences.autoAdjustBitrate) {
+                            if (StreamingPreferences.autoAdjustBitrate && !bitrateLockCheck.checked) {
                                 StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
                                                                                                           StreamingPreferences.height,
                                                                                                           StreamingPreferences.fps,

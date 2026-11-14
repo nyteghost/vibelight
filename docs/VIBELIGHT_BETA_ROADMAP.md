@@ -246,3 +246,13 @@ gates. This does not finish the desktop display manager, toolbar or transfer cen
 - [ ] Per-session host encoder/applied-bitrate telemetry, optional cleanup recording and Android TV diagnostic UI.
 
 See [Streaming check](STREAMING_CHECK.md). Existing host-card 2FA work remains a separate paused draft.
+
+### Bitrate lock — November 14, 2026
+
+- Added a persistent Settings lock with precedence over global and host-profile
+  automatic adaptation, preserving manual target selection and host limits.
+- Prevented automatic resolution/FPS/color target resets and the launch-time
+  YUV444 fallback target reset while locked.
+- Added compile-time policy regressions for all lock/adaptation combinations.
+- Windows CI and physical streaming validation pending; live in-stream toggling
+  is not part of this increment.

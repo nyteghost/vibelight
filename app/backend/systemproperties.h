@@ -63,6 +63,8 @@ public:
     Q_INVOKABLE bool shortcutMenuAutoHide();
     Q_INVOKABLE void setShortcutMenuAutoHide(bool hide);
     Q_INVOKABLE bool clipboardAutoSync();
+    Q_INVOKABLE bool bitrateLocked();
+    Q_INVOKABLE void setBitrateLocked(bool locked);
     Q_INVOKABLE bool autoBitrate();
     Q_INVOKABLE void setAutoBitrate(bool enabled);
     Q_INVOKABLE int autoBitrateNotificationPosition();

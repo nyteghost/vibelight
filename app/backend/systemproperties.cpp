@@ -1,3 +1,4 @@
+#include "streaming/networktestrequest.h"
 #include "systemproperties.h"
 #include "utils.h"
 
@@ -581,4 +582,14 @@ int SystemProperties::suggestedBitrateKbps()
 {
     QSettings settings;
     return settings.value("vibelight/suggestedBitrateKbps", 0).toInt();
+}
+
+bool SystemProperties::networkTestQueued()
+{
+    return vibelight::networkTestQueued();
+}
+
+void SystemProperties::queueNetworkTest(bool queued)
+{
+    vibelight::queueNetworkTest(queued);
 }

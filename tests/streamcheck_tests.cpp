@@ -1,3 +1,4 @@
+#include "streaming/networktestrequest.h"
 #include "streaming/networkbitratecheck.h"
 #include "settings/bitratepolicy.h"
 #include "streaming/streamcheckmetrics.h"
@@ -7,6 +8,14 @@
 
 int main(int argc, char** argv) {
     using namespace vibelight;
+    assert(!networkTestQueued());
+    queueNetworkTest(true);
+    assert(networkTestQueued());
+    assert(takeNetworkTest());
+    assert(!takeNetworkTest());
+    queueNetworkTest(true);
+    queueNetworkTest(false);
+    assert(!takeNetworkTest());
     CheckMetrics network{true, true, true, 60, 0, 2, 0};
     assert(networkBitrateAdvice(network, 20000, 50000, 60, true).kbps == 50000);
     network.networkDropPercent = 1.5;

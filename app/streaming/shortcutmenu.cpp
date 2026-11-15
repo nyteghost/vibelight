@@ -1,3 +1,4 @@
+#include "networktestrequest.h"
 #include "networkbitratecheck.h"
 #include "shortcutmenu.h"
 #include "streamcheckmetrics.h"
@@ -1045,6 +1046,14 @@ void ShortcutMenu::endTransient()
 
 void ShortcutMenu::tick()
 {
+    // Allow the decoder to settle before starting a dashboard-requested sample.
+    // Secondary windows must not consume the primary stream's request.
+    if (!m_DashboardNetworkRequestChecked && !Session::isSecondaryWindow() &&
+        SDL_GetTicks() - m_StartTicks >= 5000) {
+        m_DashboardNetworkRequestChecked = true;
+        if (vibelight::takeNetworkTest()) startConnectionCheck(true);
+    }
+
     pollClipboard();
 
     if (Session* session = Session::get()) {

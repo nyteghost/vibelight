@@ -169,10 +169,11 @@ CenteredGridView {
     // and keyboard GridView navigation unchanged.
     header: Item {
         width: pcGrid.width
-        height: pcGrid.count > 0 ? (pcGrid.width < 600 ? 126 : 108) : 0
+        height: pcGrid.count > 0 ? dashboardHeader.implicitHeight + 36 : 0
         visible: pcGrid.count > 0
 
         Column {
+            id: dashboardHeader
             anchors.left: parent.left
             anchors.leftMargin: 24
             anchors.right: parent.right
@@ -180,6 +181,17 @@ CenteredGridView {
             anchors.topMargin: 22
             spacing: 8
 
+            Button {
+                id: networkTestButton
+                objectName: "dashboardNetworkTestButton"
+                text: qsTr("Network test")
+                activeFocusOnTab: true
+                onClicked: {
+                    networkTestDialog.queued = SystemProperties.networkTestQueued()
+                    networkTestDialog.open()
+                }
+                Keys.onDownPressed: pcGrid.forceActiveFocus()
+            }
             Label {
                 text: qsTr("YOUR COMPUTERS · %1").arg(pcGrid.count)
                 font.pixelSize: 12
@@ -489,6 +501,20 @@ CenteredGridView {
             deletePcDialog.pcName = model.name
             deletePcDialog.open()
         }
+    }
+
+    NavigableMessageDialog {
+        id: networkTestDialog
+        property bool queued: false
+        title: qsTr("Network test")
+        standardButtons: Dialog.Yes | Dialog.No
+        text: queued ? qsTr("A network check is queued for your next primary stream. Cancel that check?") :
+              qsTr("Queue a network check for your next stream? Connect to the PC you want to test, then play with movement on screen. After a short warm-up, Vibelight observes 20 seconds of streaming. This does not measure maximum download speed.\n\nTurn off automatic bitrate or enable bitrate lock before connecting. Results and Apply and lock are in the streaming menu under Tools & session. Applying a recommendation affects the next connection only. No settings change automatically.")
+        onAccepted: {
+            SystemProperties.queueNetworkTest(!queued)
+            networkTestButton.forceActiveFocus()
+        }
+        onRejected: networkTestButton.forceActiveFocus()
     }
 
     ErrorMessageDialog {

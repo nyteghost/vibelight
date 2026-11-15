@@ -67,3 +67,15 @@ This is a passive network quality check, not a maximum-throughput speed test. It
 does not send synthetic traffic, estimate upload capacity, recommend untested
 higher rates, or certify a best bitrate. Actual host caps remain authoritative.
 An authenticated, bounded active bandwidth test in Vibebeam is still future work.
+
+### Dashboard entry point
+
+The top-left **Network test** button on Your computers can queue the passive
+20-second check for the next primary stream. Connect to the intended PC and
+play moving gameplay. Sampling starts after a five-second menu warm-up. Turn off
+automatic bitrate (including host overrides) or enable bitrate lock before
+connecting; otherwise the stream shows an explanation and does not sample.
+Results and **Apply and lock** remain in **Tools & session** during the stream.
+The dashboard button can cancel a queued check. Requests are process-local and
+clear when Vibelight exits. No stream is launched or bitrate changed by queueing.
+This is not a pre-connection throughput test. Physical Windows validation pending.

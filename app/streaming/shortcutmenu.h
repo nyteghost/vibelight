@@ -238,6 +238,7 @@ private:
     // Connection check state
     std::shared_ptr<vibelight::CheckExportState> m_CheckExport;
     QString m_CheckReportPath;
+    bool m_DashboardNetworkRequestChecked = false;
     bool m_NetworkTest = false;
     int m_NetworkRecommendation = 0;
     std::string m_NetworkResult;

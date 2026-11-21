@@ -79,3 +79,13 @@ Results and **Apply and lock** remain in **Tools & session** during the stream.
 The dashboard button can cancel a queued check. Requests are process-local and
 clear when Vibelight exits. No stream is launched or bitrate changed by queueing.
 This is not a pre-connection throughput test. Physical Windows validation pending.
+
+### Bitrate ownership context
+
+The report's `stream_at_start` / `stream_at_end` context includes
+`bitrate_owner` (`fixed`, `client_automatic`, or `not_started`) and
+`bitrate_settings_source` (`global_or_cli` or `host_profile`). These describe
+local policy; `client_automatic` retains authority even if it pauses after
+failed requests. They do not certify a host-applied rate or a capability.
+The host advisor remains read-only; network Apply-and-lock remains next-stream.
+See [the source audit and shared cooldown contract](BITRATE_OWNERSHIP.md).

@@ -109,8 +109,8 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 void StreamingPreferences::reload()
 {
     QSettings settings;
-    m_SessionBitrateLocked = settings.value("vibelight/bitrateLocked", false).toBool();
-    m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
+    m_SessionBitratePolicy.locked = settings.value("vibelight/bitrateLocked", false).toBool();
+    m_SessionBitratePolicy.requested = settings.value("vibelight/autoBitrate", false).toBool();
 
     int defaultVer = settings.value(SER_DEFAULTVER, 0).toInt();
 
@@ -340,9 +340,9 @@ StreamingPreferences* StreamingPreferences::cloneForSession() const
     // These are the only non-Q_PROPERTY preference values.
     snapshot->packetSize = packetSize;
     snapshot->recommendedFullScreenMode = recommendedFullScreenMode;
-    snapshot->m_SessionBitrateLocked = m_IsSessionSnapshot ? m_SessionBitrateLocked :
+    snapshot->m_SessionBitratePolicy = m_SessionBitratePolicy;
+    snapshot->m_SessionBitratePolicy.locked = m_IsSessionSnapshot ? m_SessionBitratePolicy.locked :
         QSettings().value("vibelight/bitrateLocked", false).toBool();
-    snapshot->m_SessionAdaptiveBitrate = m_SessionAdaptiveBitrate;
     snapshot->m_IsSessionSnapshot = true;
     return snapshot;
 }
@@ -351,18 +351,18 @@ StreamingPreferences* StreamingPreferences::forHost(const QString& uuid) const
 {
     auto snapshot = cloneForSession();
     QSettings settings;
-    // The live adaptive toggle is saved separately by SettingsView.
-    snapshot->m_SessionAdaptiveBitrate = settings.value("vibelight/autoBitrate", false).toBool();
-    snapshot->m_SessionBitrateLocked = snapshot->m_SessionBitrateLocked ||
-        settings.value("vibelight/hostBitrateLock/" + uuid.toUtf8().toHex(), false).toBool();
     const auto stored = vibelight::readHostProfile(settings, uuid);
+    snapshot->m_SessionBitratePolicy = vibelight::resolveBitratePolicy(
+        settings.value("vibelight/autoBitrate", false).toBool(),
+        snapshot->m_SessionBitratePolicy.locked,
+        settings.value("vibelight/hostBitrateLock/" + uuid.toUtf8().toHex(), false).toBool(),
+        stored.valid, stored.profile.adaptiveBitrate);
     if (stored.valid) {
         snapshot->width = stored.profile.width;
         snapshot->height = stored.profile.height;
         snapshot->fps = stored.profile.fps;
         snapshot->bitrateKbps = stored.profile.bitrateKbps;
         snapshot->autoAdjustBitrate = false; // A profile bitrate is an explicit ceiling.
-        snapshot->m_SessionAdaptiveBitrate = stored.profile.adaptiveBitrate;
     }
     return snapshot;
 }

@@ -61,6 +61,24 @@ CenteredGridView {
         activated = false
     }
 
+    function loadLaunchComponent(source)
+    {
+        var component = Qt.createComponent(source)
+        if (component.status !== Component.Ready) {
+            showLaunchPageError(component.errorString())
+            return null
+        }
+        return component
+    }
+
+    function showLaunchPageError(details)
+    {
+        console.error("Unable to load streaming screen: " + details)
+        launchPageError.text = qsTr("The streaming screen could not be opened. Try restarting Vibelight or updating to the latest beta.") +
+                               (details ? "\n\n" + details : "")
+        launchPageError.open()
+    }
+
     function createModel()
     {
         var model = Qt.createQmlObject('import AppModel 1.0; AppModel {}', parent, '')
@@ -218,12 +236,17 @@ CenteredGridView {
                 return
             }
 
-            var component = Qt.createComponent("StreamSegue.qml")
+            var component = appGrid.loadLaunchComponent("StreamSegue.qml")
+            if (!component) return
             var segue = component.createObject(stackView, {
                                                    "appName": model.name,
                                                    "session": appModel.createSessionForApp(index),
                                                    "isResume": runningId === model.appid
                                                })
+            if (!segue) {
+                appGrid.showLaunchPageError(component.errorString())
+                return
+            }
             stackView.push(segue)
         }
 
@@ -294,6 +317,8 @@ CenteredGridView {
             asynchronous: true
             sourceComponent: NavigableMenu {
                 id: appContextMenu
+                objectName: "appContextMenu"
+                width: Math.min(380, Math.max(160, appGrid.width - 24))
                 initiator: appContextMenuLoader.parent
                 NavigableMenuItem {
                     text: model.running ? qsTr("Resume Game") : qsTr("Launch Game")
@@ -304,29 +329,23 @@ CenteredGridView {
                     onTriggered: doQuitGame()
                     visible: model.running
                 }
-                NavigableMenuItem {
+                DescriptiveMenuItem {
                     checkable: true
                     checked: model.directLaunch
                     text: qsTr("Direct Launch")
                     onTriggered: appModel.setAppDirectLaunch(model.index, !model.directLaunch)
                     enabled: !model.hidden
 
-                    ToolTip.text: qsTr("Launch this app immediately when the host is selected, bypassing the app selection grid.")
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 3000
-                    ToolTip.visible: hovered
+                    description: qsTr("Launch this app immediately when the host is selected, bypassing the app selection grid.")
                 }
-                NavigableMenuItem {
+                DescriptiveMenuItem {
                     checkable: true
                     checked: model.hidden
                     text: qsTr("Hide Game")
                     onTriggered: appModel.setAppHidden(model.index, !model.hidden)
                     enabled: model.hidden || (!model.running && !model.directLaunch)
 
-                    ToolTip.text: qsTr("Hide this game from the app grid. To access hidden games, right-click on the host and choose %1.").arg(qsTr("View All Apps"))
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 5000
-                    ToolTip.visible: hovered
+                    description: qsTr("Hide this game from the app grid. To access hidden games, right-click on the host and choose %1.").arg(qsTr("View All Apps"))
                 }
             }
         }
@@ -355,7 +374,8 @@ CenteredGridView {
         standardButtons: Dialog.Yes | Dialog.No
 
         function quitApp() {
-            var component = Qt.createComponent("QuitSegue.qml")
+            var component = appGrid.loadLaunchComponent("QuitSegue.qml")
+            if (!component) return
             var params = {"appName": appName, "quitRunningAppFn": function() { appModel.quitRunningApp() }}
             if (segueToStream) {
                 // Store the session and app name if we're going to stream after
@@ -368,10 +388,22 @@ CenteredGridView {
                 params.nextSession = null
             }
 
-            stackView.push(component.createObject(stackView, params))
+            var segue = component.createObject(stackView, params)
+            if (!segue) {
+                appGrid.showLaunchPageError(component.errorString())
+                return
+            }
+            stackView.push(segue)
         }
 
         onAccepted: quitApp()
+    }
+
+    NavigableMessageDialog {
+        id: launchPageError
+        objectName: "launchPageError"
+        title: qsTr("Unable to start streaming")
+        standardButtons: Dialog.Ok
     }
 
     ScrollBar.vertical: ScrollBar {}

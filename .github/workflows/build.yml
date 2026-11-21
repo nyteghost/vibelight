@@ -13,6 +13,8 @@ on:
     paths-ignore:
       - '**.md'
       - 'LICENSE'
+      - 'android-tv/**'
+      - '.github/workflows/android-tv.yml'
   workflow_dispatch:
 
 concurrency:
@@ -41,6 +43,32 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -I app tests/logic_tests.cpp -o logic_tests
           ./logic_tests
+          g++ -std=c++17 -Wall -Wextra -Werror -I app tests/streamcheck_tests.cpp -o streamcheck_tests
+          ./streamcheck_tests /tmp/streamcheck.zip
+          python3 -c 'import zipfile,json; z=zipfile.ZipFile("/tmp/streamcheck.zip"); assert z.testzip() is None; assert z.namelist()==["report.json","README.txt"]; assert json.loads(z.read("report.json"))["schema"]==1'
+
+
+  host-profile-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Qt Core test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript pkg-config
+      - name: Compile production HTTP client (streaming-check regression)
+        run: |
+          git submodule update --init --recursive moonlight-common-c/moonlight-common-c
+          g++ -std=c++17 -fPIC -fsyntax-only -I moonlight-common-c/moonlight-common-c/src $(pkg-config --cflags Qt6Core Qt6Network Qt6Gui) app/backend/nvhttp.cpp
+      - name: Exercise host profile isolation and persistence
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fPIC -I app tests/host_profile_tests.cpp $(pkg-config --cflags --libs Qt6Core) -o host_profile_tests
+          ./host_profile_tests
+          g++ -std=c++17 -Wall -Wextra -Werror -fPIC -I app tests/streamcheck_report_tests.cpp $(pkg-config --cflags --libs Qt6Core) -o streamcheck_report_tests
+          ./streamcheck_report_tests
+      - name: Exercise profile editor and app-tile launch
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml -import tests/qml/stubs
 
   # Runs the one-click updater script against throwaway folders on Windows.
   updater-tests:

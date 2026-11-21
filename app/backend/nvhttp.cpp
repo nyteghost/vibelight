@@ -16,6 +16,13 @@
 #include <QImageReader>
 #include <QtEndian>
 #include <QNetworkProxy>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QStandardPaths>
+#include <QDir>
+#include <QTemporaryFile>
+#include <QSettings>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -569,6 +576,82 @@ NvHTTP::clipboardRequest(bool post, const QByteArray& body, QByteArray& response
     return true;
 }
 
+int
+NvHTTP::checkHostTwoFactor(const QString& code, QString& error)
+{
+    error.clear();
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = tr("The host isn't paired over HTTPS.");
+        return 0;
+    }
+    const QByteArray codeBytes = code.trimmed().toUtf8();
+    if (codeBytes.size() > 64) {
+        error = tr("The two-factor code is too long.");
+        return 0;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/actions/two-factor");
+    url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
+                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex());
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain; charset=utf-8");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+#endif
+
+    const auto errors = connect(m_Nam, &QNetworkAccessManager::sslErrors,
+                                this, &NvHTTP::handleSslErrors);
+    // The code is sent in the POST body, not exposed in a URL or log entry.
+    QNetworkReply* reply = codeBytes.isEmpty() ? m_Nam->get(request) : m_Nam->post(request, codeBytes);
+    const QSslCertificate pinned = m_ServerCert;
+    connect(reply, &QNetworkReply::encrypted, reply, [reply, pinned]() {
+        if (pinned.isNull() || reply->sslConfiguration().peerCertificate() != pinned) reply->abort();
+    });
+    constexpr qint64 maxResponseBytes = 4096;
+    connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
+        if (reply->bytesAvailable() > 4096) reply->abort();
+    });
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
+        if (received > 4096 || total > 4096) reply->abort();
+    });
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) reply->abort();
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+    m_Nam->clearAccessCache();
+#endif
+    disconnect(errors);
+    const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QNetworkReply::NetworkError netError = reply->error();
+    const QByteArray body = reply->read(maxResponseBytes + 1);
+    delete reply;
+    if (timedOut || netError != QNetworkReply::NoError || httpStatus != 200 || body.size() > maxResponseBytes) {
+        error = timedOut ? tr("The host didn't answer the two-factor check.") :
+                tr("The secure two-factor check failed (HTTP %1, network %2).").arg(httpStatus).arg(int(netError));
+        return 0;
+    }
+    try {
+        verifyResponseStatus(QString::fromUtf8(body));
+        return 200;
+    }
+    catch (const GfeHttpResponseException& exception) {
+        const int status = exception.getStatusCode();
+        if (status == 470 || status == 471 || status == 472 || status == 473) return status;
+        error = exception.toQString();
+        return 0;
+    }
+}
+
 bool
 NvHTTP::getMonitors(QStringList& ids, QStringList& names, QString& error)
 {
@@ -743,7 +826,8 @@ NvHTTP::setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error)
 }
 
 bool
-NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
+NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error,
+                   std::atomic<bool>* cancelled, std::atomic<int>* progress)
 {
     static const qint64 kMaxUploadBytes = 512LL * 1024 * 1024; // matches the host's limit
 
@@ -819,6 +903,20 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
     // QFile and QNetworkAccessManager live on the same worker thread. The file
     // remains open until the reply has finished or has been aborted/deleted.
     QNetworkReply* reply = m_Nam->post(request, &file);
+    if (progress) {
+        progress->store(0);
+        connect(reply, &QNetworkReply::uploadProgress, reply, [progress](qint64 sent, qint64 total) {
+            if (total > 0) progress->store(static_cast<int>(qBound<qint64>(qint64(0), sent * 100 / total, qint64(99))));
+        });
+    }
+    QTimer cancelPoll;
+    if (cancelled) {
+        cancelPoll.setInterval(125);
+        connect(&cancelPoll, &QTimer::timeout, reply, [reply, cancelled]() {
+            if (cancelled->load() && !reply->isFinished()) reply->abort();
+        });
+        cancelPoll.start();
+    }
 
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -849,8 +947,11 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
             << "networkError=" << (int)networkError << networkErrorText
             << "responseBytes=" << response.size() << "sslProblems=" << sslProblems;
 
-    if (timedOut) {
-        error = "the host didn't finish receiving it";
+    if (cancelled && cancelled->load()) {
+        error = "transfer canceled";
+    }
+    else if (timedOut) {
+        error = "the host didn\'t finish receiving it";
     }
     else if (status == 401) {
         error = "the host refused it. Allow \"Upload files\" for this client in the host's web UI";
@@ -879,6 +980,259 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error)
     return false;
 }
 
+
+bool NvHTTP::downloadNewestHostFile(QString& savedPath, QString& error)
+{
+    return downloadHostFile(QString(), savedPath, error);
+}
+
+bool NvHTTP::getHostFileList(QStringList& names, QString& error)
+{
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/actions/files");
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    auto ssl = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer timer;
+    timer.setSingleShot(true);
+    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(15000);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool timeout = !reply->isFinished();
+    if (timeout) reply->abort();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const bool success = !timeout && status == 200 && reply->error() == QNetworkReply::NoError;
+    const QByteArray data = reply->read(128 * 1024 + 1);
+    delete reply;
+    disconnect(ssl);
+    if (!success) {
+        error = status == 401 ? "enable Download files for this client in Vibebeam" :
+                status == 403 ? "a stream must be active to download host files" :
+                status == 404 ? "the host needs the matching download beta" :
+                timeout ? "file list request timed out" :
+                "host file list failed (HTTP " + QString::number(status) + ")";
+        return false;
+    }
+    if (data.size() > 128 * 1024) {
+        error = "host file list was too large";
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        error = "invalid host file list";
+        return false;
+    }
+    names.clear();
+    const auto entries = document.object().value("files").toArray();
+    for (const auto& entry : entries) {
+        const QString name = entry.toObject().value("name").toString();
+        if (!name.isEmpty() && name != "." && name != ".." &&
+            name == QFileInfo(name).fileName() &&
+            !name.contains('/') && !name.contains('\\') && !names.contains(name)) {
+            names.append(name);
+        }
+    }
+    return true;
+}
+
+bool NvHTTP::downloadHostFile(const QString& requestedName, QString& savedPath, QString& error,
+                              std::atomic<bool>* cancelled, std::atomic<int>* progress)
+{
+    constexpr qint64 maxDownload = 512LL * 1024 * 1024;
+    if (m_ServerCert.isNull() || m_BaseUrlHttps.port(0) == 0) {
+        error = "this host isn't paired over HTTPS";
+        return false;
+    }
+
+    // Listing is deliberately bounded on the host. Keep the same pinned TLS
+    // configuration used for file uploads, and never follow redirects.
+    QUrl listUrl(m_BaseUrlHttps);
+    listUrl.setPath("/actions/files");
+    QNetworkRequest listRequest(listUrl);
+    listRequest.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    listRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    auto sslHandler = connect(m_Nam, &QNetworkAccessManager::sslErrors,
+                              this, &NvHTTP::handleSslErrors);
+    QNetworkReply* listReply = m_Nam->get(listRequest);
+    QEventLoop listLoop;
+    connect(listReply, &QNetworkReply::finished, &listLoop, &QEventLoop::quit);
+    QTimer listTimer;
+    listTimer.setSingleShot(true);
+    connect(&listTimer, &QTimer::timeout, &listLoop, &QEventLoop::quit);
+    listTimer.start(15000);
+    listLoop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool listTimedOut = !listReply->isFinished();
+    if (listTimedOut) listReply->abort();
+    const int listStatus = listReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const bool listOk = !listTimedOut && listReply->error() == QNetworkReply::NoError &&
+                        listStatus == 200;
+    const QByteArray listing = listReply->readAll();
+    delete listReply;
+    if (!listOk) {
+        disconnect(sslHandler);
+        error = listStatus == 401 ? "allow Download files for this client in the Vibebeam web UI" :
+                listStatus == 403 ? "host-to-client downloads require an active stream" :
+                listStatus == 404 ? "the host doesn't support downloads yet; install the host beta" :
+                listTimedOut ? "timed out asking the host for files" :
+                "couldn't list host files (HTTP " + QString::number(listStatus) + ")";
+        return false;
+    }
+    if (listing.size() > 128 * 1024) {
+        disconnect(sslHandler);
+        error = "the host returned an oversized file list";
+        return false;
+    }
+    const QJsonDocument parsed = QJsonDocument::fromJson(listing);
+    const QJsonArray files = parsed.object().value("files").toArray();
+    if (files.isEmpty()) {
+        disconnect(sslHandler);
+        error = "the host's shared transfer folder has no downloadable files";
+        return false;
+    }
+    QJsonObject selected;
+    if (requestedName.isEmpty()) {
+        selected = files.first().toObject();
+    }
+    else {
+        for (const auto& candidate : files) {
+            const QJsonObject entry = candidate.toObject();
+            if (entry.value("name").toString() == requestedName) {
+                selected = entry;
+                break;
+            }
+        }
+        if (selected.isEmpty()) {
+            disconnect(sslHandler);
+            error = "the selected host file is no longer available";
+            return false;
+        }
+    }
+    const QString name = selected.value("name").toString();
+    const qint64 expectedSize = static_cast<qint64>(selected.value("size").toDouble(-1));
+    if (name.isEmpty() || name == "." || name == ".." ||
+        name != QFileInfo(name).fileName() || name.contains('\\') || name.contains('/') ||
+        expectedSize < 0 || expectedSize > maxDownload) {
+        disconnect(sslHandler);
+        error = "the host returned an invalid download entry";
+        return false;
+    }
+
+    QString directory = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (directory.isEmpty()) {
+        directory = QDir::homePath() + "/Downloads";
+    }
+    directory = QSettings().value("vibelight/downloadFolder",
+                                      QDir(directory).filePath("Vibelight")).toString();
+    if (!QDir::isAbsolutePath(directory) || !QDir().mkpath(directory)) {
+        disconnect(sslHandler);
+        error = "couldn't create Downloads/Vibelight";
+        return false;
+    }
+    QTemporaryFile temporary(QDir(directory).filePath(".vibelight-XXXXXX.part"));
+    if (!temporary.open()) {
+        disconnect(sslHandler);
+        error = "couldn't create a temporary download file";
+        return false;
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/actions/download");
+    QUrlQuery query;
+    query.addQueryItem("name", name);
+    url.setQuery(query);
+    QNetworkRequest request(url);
+    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setRawHeader("Accept-Encoding", "identity");
+    QNetworkReply* reply = m_Nam->get(request);
+    qint64 received = 0;
+    bool writeFailed = false;
+    if (progress) progress->store(0);
+    QTimer cancelPoll;
+    if (cancelled) {
+        cancelPoll.setInterval(125);
+        connect(&cancelPoll, &QTimer::timeout, reply, [reply, cancelled]() {
+            if (cancelled->load() && !reply->isFinished()) reply->abort();
+        });
+        cancelPoll.start();
+    }
+    auto drain = [&]() {
+        while (reply->bytesAvailable() > 0) {
+            const QByteArray chunk = reply->read(qMin<qint64>(reply->bytesAvailable(), 128 * 1024));
+            if (chunk.isEmpty()) break;
+            received += chunk.size();
+            if (progress && expectedSize > 0)
+                progress->store(static_cast<int>(qBound<qint64>(qint64(0), received * 100 / expectedSize, qint64(99))));
+            if (received > maxDownload || received > expectedSize ||
+                temporary.write(chunk) != chunk.size()) {
+                writeFailed = true;
+                reply->abort();
+                return;
+            }
+        }
+    };
+    connect(reply, &QNetworkReply::readyRead, reply, drain);
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer timer;
+    timer.setSingleShot(true);
+    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(10 * 60 * 1000);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    const bool timedOut = !reply->isFinished();
+    if (timedOut) reply->abort();
+    if (!writeFailed) drain();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const bool complete = !timedOut && !writeFailed &&
+                          reply->error() == QNetworkReply::NoError &&
+                          status == 200 && received == expectedSize &&
+                          reply->header(QNetworkRequest::ContentLengthHeader).toLongLong() == expectedSize;
+    delete reply;
+    disconnect(sslHandler);
+    if (!complete || !temporary.flush() || (cancelled && cancelled->load())) {
+        error = (cancelled && cancelled->load()) ? "transfer canceled" :
+                status == 401 ? "Download files permission is required" :
+                status == 403 ? "the stream must remain active during download" :
+                timedOut ? "host download timed out" :
+                "download failed or was incomplete";
+        return false;
+    }
+    temporary.close();
+
+    // Never overwrite an existing local file. QTemporaryFile::rename refuses
+    // to replace an existing target, unlike QSaveFile's commit behavior.
+    const QFileInfo original(name);
+    for (int index = 0; index < 1000; ++index) {
+        QString candidate = name;
+        if (index > 0) {
+            const QString stem = original.completeBaseName();
+            const QString ext = original.completeSuffix();
+            candidate = stem + " (" + QString::number(index) + ")" +
+                        (ext.isEmpty() ? QString() : "." + ext);
+        }
+        const QString dest = QDir(directory).filePath(candidate);
+        if (QFileInfo::exists(dest)) continue;
+        if (temporary.rename(dest)) {
+            savedPath = dest;
+            if (progress) progress->store(100);
+            return true;
+        }
+        if (QFileInfo::exists(dest)) continue; // concurrent download won the name
+        break;
+    }
+    error = "couldn't save the received file without overwriting another file";
+    return false;
+}
+
 bool
 NvHTTP::getClipboardText(QString& text, QString& error)
 {
@@ -895,6 +1249,22 @@ NvHTTP::setClipboardText(const QString& text, QString& error)
 {
     QByteArray response;
     return clipboardRequest(true, text.toUtf8(), response, error);
+}
+
+QJsonObject NvHTTP::streamingCheck()
+{
+    if (m_ServerCert.isNull()) return {{"status", "unavailable"}};
+    try {
+        QNetworkReply* reply = openConnection(m_BaseUrlHttps, "actions/streaming-check", QString(), 5000, NVLL_NONE, 65536);
+        const QByteArray body = reply->read(65537);
+        delete reply;
+        if (body.size() > 65536) return {{"status", "unavailable"}};
+        const auto document = QJsonDocument::fromJson(body);
+        if (!document.isObject()) return {{"status", "unavailable"}};
+        return document.object(); // Exporter validates an allowlist; never export raw host JSON.
+    } catch (...) {
+        return {{"status", "unavailable"}}; // No URLs, IDs or raw network errors in exports.
+    }
 }
 
 QString
@@ -926,7 +1296,7 @@ NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
                        QString arguments,
                        int timeoutMs,
-                       NvLogLevel logLevel)
+                       NvLogLevel logLevel, qint64 maxResponseBytes)
 {
     // Port must be set
     Q_ASSERT(baseUrl.port(0) != 0);
@@ -941,6 +1311,8 @@ NvHTTP::openConnection(QUrl baseUrl,
                  ((arguments != nullptr) ? ("&" + arguments) : ""));
 
     QNetworkRequest request(url);
+    if (maxResponseBytes > 0) request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+
 
     // Add our client certificate
     request.setSslConfiguration(IdentityManager::get()->getSslConfig());
@@ -959,6 +1331,18 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
     QNetworkReply* reply = m_Nam->get(request);
+    if (maxResponseBytes > 0) {
+        const auto pinnedCertificate = m_ServerCert;
+        connect(reply, &QNetworkReply::encrypted, reply, [reply, pinnedCertificate]() {
+            if (pinnedCertificate.isNull() || reply->sslConfiguration().peerCertificate() != pinnedCertificate) reply->abort();
+        });
+        connect(reply, &QNetworkReply::readyRead, reply, [reply, maxResponseBytes]() {
+            if (reply->bytesAvailable() > maxResponseBytes) reply->abort();
+        });
+        connect(reply, &QNetworkReply::downloadProgress, reply, [reply, maxResponseBytes](qint64 received, qint64 total) {
+            if (received > maxResponseBytes || total > maxResponseBytes) reply->abort();
+        });
+    }
 
     // Run the request with a timeout if requested
     QEventLoop loop;

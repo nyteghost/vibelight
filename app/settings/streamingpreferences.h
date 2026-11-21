@@ -1,3 +1,4 @@
+#include "bitratepolicy.h"
 #pragma once
 
 #include <QObject>
@@ -17,6 +18,12 @@ public:
     Q_INVOKABLE void save();
 
     void reload();
+
+    // Session-owned copies prevent host overrides and runtime fallbacks leaking globally.
+    StreamingPreferences* cloneForSession() const;
+    StreamingPreferences* forHost(const QString& uuid) const;
+    bool sessionBitrateLocked() const { return m_SessionBitrateLocked; }
+    bool sessionAdaptiveBitrate() const { return vibelight::allowAdaptiveBitrate(m_SessionAdaptiveBitrate, m_SessionBitrateLocked); }
 
     enum AudioConfig
     {
@@ -251,5 +258,8 @@ private:
     QString getSuffixFromLanguage(Language lang);
 
     QQmlEngine* m_QmlEngine;
+    bool m_IsSessionSnapshot = false;
+    bool m_SessionBitrateLocked = false;
+    bool m_SessionAdaptiveBitrate = false;
 };
 

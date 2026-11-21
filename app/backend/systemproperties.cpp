@@ -1,3 +1,4 @@
+#include "streaming/networktestrequest.h"
 #include "systemproperties.h"
 #include "utils.h"
 
@@ -465,6 +466,16 @@ void SystemProperties::setClipboardAutoSync(bool enabled)
     QSettings().setValue("vibelight/clipboardAutoSync", enabled);
 }
 
+bool SystemProperties::bitrateLocked()
+{
+    return QSettings().value("vibelight/bitrateLocked", false).toBool();
+}
+
+void SystemProperties::setBitrateLocked(bool locked)
+{
+    QSettings().setValue("vibelight/bitrateLocked", locked);
+}
+
 bool SystemProperties::autoBitrate()
 {
     return QSettings().value("vibelight/autoBitrate", false).toBool();
@@ -483,6 +494,42 @@ int SystemProperties::autoBitrateNotificationPosition()
 void SystemProperties::setAutoBitrateNotificationPosition(int position)
 {
     QSettings().setValue("vibelight/autoBitrateNotificationPosition", position == 1 ? 1 : 0);
+}
+
+bool SystemProperties::idleDisconnectEnabled()
+{
+    return QSettings().value("vibelight/idleDisconnectEnabled", true).toBool();
+}
+
+void SystemProperties::setIdleDisconnectEnabled(bool enabled)
+{
+    QSettings().setValue("vibelight/idleDisconnectEnabled", enabled);
+}
+
+QString SystemProperties::downloadFolder()
+{
+    const QString downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    const QString fallback = QDir(downloads.isEmpty() ? QDir::homePath() + "/Downloads" : downloads)
+                                 .filePath("Vibelight");
+    const QString configured = QSettings().value("vibelight/downloadFolder").toString();
+    return configured.isEmpty() ? fallback : configured;
+}
+
+bool SystemProperties::setDownloadFolder(const QString& folder)
+{
+    const QString clean = QDir::cleanPath(folder.trimmed());
+    if (clean.isEmpty() || !QDir::isAbsolutePath(clean) ||
+        !QDir().mkpath(clean) || !QFileInfo(clean).isWritable()) {
+        return false;
+    }
+    QSettings().setValue("vibelight/downloadFolder", clean);
+    return true;
+}
+
+bool SystemProperties::openDownloadFolder()
+{
+    const QString folder = downloadFolder();
+    return QDir().mkpath(folder) && QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
 }
 
 QString SystemProperties::problemReportUrl()
@@ -535,4 +582,14 @@ int SystemProperties::suggestedBitrateKbps()
 {
     QSettings settings;
     return settings.value("vibelight/suggestedBitrateKbps", 0).toInt();
+}
+
+bool SystemProperties::networkTestQueued()
+{
+    return vibelight::networkTestQueued();
+}
+
+void SystemProperties::queueNetworkTest(bool queued)
+{
+    vibelight::queueNetworkTest(queued);
 }

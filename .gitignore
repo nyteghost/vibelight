@@ -7,3 +7,6 @@ build/
 libs/
 config.tests/*/.qmake.stash
 config.tests/*/Makefile
+
+# Android TV generated work trees stay outside the repository.
+android-tv/**/__pycache__/

@@ -118,6 +118,7 @@ private:
     VIDEO_STATS m_ActiveWndVideoStats;
     VIDEO_STATS m_LastWndVideoStats;
     VIDEO_STATS m_GlobalVideoStats;
+    std::mutex m_ConnectionStatsMutex;
     std::set<IFFmpegRenderer::RendererType> m_FailedRenderers;
 
     int m_FramesIn;

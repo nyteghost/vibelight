@@ -9,6 +9,8 @@
 #include <QUrl>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <atomic>
+#include <QJsonObject>
 
 class NvComputer;
 
@@ -174,6 +176,11 @@ public:
              const QString& twoFactorCode = QString(),
              const QString& monitorId = QString());
 
+    // Host-selection preflight (paired Vibebeam only). 200 verified, 470 needed,
+    // 471 invalid, 472 locked, 473 unavailable; 0 for transport/other errors.
+    // Must run on a worker thread; never stores the authenticator code.
+    int checkHostTwoFactor(const QString& code, QString& error);
+
     // Clipboard sync with Apollo-style hosts such as Vibepollo (text only). Both return false and
     // fill in a short explanation when the host refuses or can't be reached.
     bool
@@ -197,7 +204,15 @@ public:
     // the "Upload files" permission). Blocks until the transfer ends, so call it from a worker
     // thread. Fills in the name the host saved it under, or a short explanation on failure.
     bool
-    uploadFile(const QString& localPath, QString& savedName, QString& error);
+    uploadFile(const QString& localPath, QString& savedName, QString& error,
+               std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr);
+
+    // Download the newest file from the host's explicitly shared receive
+    // folder (requires the host's Download files permission). Call on a worker.
+    bool downloadNewestHostFile(QString& savedPath, QString& error);
+    bool getHostFileList(QStringList& names, QString& error);
+    bool downloadHostFile(const QString& name, QString& savedPath, QString& error,
+                          std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr);
 
     QVector<NvApp>
     getAppList();
@@ -208,6 +223,8 @@ public:
     static
     QVector<NvDisplayMode>
     getDisplayModeList(QString serverInfo);
+
+    QJsonObject streamingCheck();
 
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
@@ -220,7 +237,7 @@ private:
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel);
+                   NvLogLevel logLevel, qint64 maxResponseBytes = 0);
 
     bool
     clipboardRequest(bool post, const QByteArray& body, QByteArray& response, QString& error);

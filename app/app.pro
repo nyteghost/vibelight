@@ -230,6 +230,8 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    settings/hostprofile.h \
+    settings/hostprofilestore.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/shortcutmenu.h \

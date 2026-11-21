@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation android:name="com.limelight.tv.TvNavigationProbe"
+        android:targetPackage="io.github.nyteghost.vibelight.tv.beta"
+        android:label="TV pairing navigation regression checks" />
+    <instrumentation android:name="com.limelight.tv.TvUpdateProbe"
+        android:targetPackage="io.github.nyteghost.vibelight.tv.beta"
+        android:label="TV updater verification and installer checks" />
+</manifest>

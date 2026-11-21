@@ -20,6 +20,9 @@ public:
           m_Enabled(policy.adaptive() && !secondaryWindow && !nvidiaHost && ceilingKbps > 0),
           m_Automatic(ceilingKbps / 1000.0), m_ConfirmedKbps(ceilingKbps) {}
 
+    SessionBitrateController(const SessionBitrateController&) = delete;
+    SessionBitrateController& operator=(const SessionBitrateController&) = delete;
+
     bool active() const { return m_Enabled && m_Failures < 2; }
     bool pending() const { return m_Pending; }
     int confirmedKbps() const { return m_ConfirmedKbps; }

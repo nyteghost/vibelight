@@ -34,7 +34,7 @@ budget, a host acknowledgement and measured traffic are different quantities.
 | Vibebeam `src/nvhttp.cpp::getAbrCapabilities` | Explicitly reports server ABR `supported:false`; it is not an active host controller. `VibebeamFeatures` has no bitrate-ownership capability today. |
 | Vibebeam `src/rtsp.cpp`, `src/config.cpp`, web settings schema | Launch negotiation derives encoder budget from client bandwidth, fixed FEC/audio/header overhead and `max_bitrate`. PyroWave has separate link/budget logic. These bounds are not another adaptive owner. |
 | Vibebeam `src/nvhttp.cpp::setBitrate`, `src/nvhttp_bitrate_policy.h`, `src/stream{,_broadcast_runtime}.{cpp,h}` | Existing runtime endpoint authenticates the paired certificate, checks view permission again after dispatch, bounds/clamps the target, applies pacing admission and routes the event to that identity's active streams. The legacy endpoint is scoped to a client identity, **not a unique stream generation**. |
-| Vibebeam `src/video.cpp`, encoder backends `src/nvenc`, `src/platform/windows/amf*` | Consume/coalesce `dynamic_bitrate` events and apply or rebuild encoders. An HTTP acknowledgement is not independently measured encoder/transport output. |
+| Vibebeam `src/video.cpp`, encoder backends `src/nvenc`, `src/amf` | Consume/coalesce `dynamic_bitrate` events and apply or rebuild encoders. An HTTP acknowledgement is not independently measured encoder/transport output. |
 | Vibebeam `src/webrtc_stream.cpp` and browser-stream UI/service | Separate WebRTC congestion-control path: constrained active peer supplies the shared encoder target. Publishing is blocked while RTSP sessions are active. This is not the host Smart Local advisor and is outside this desktop RTSP change. |
 
 ## One owner, one timeline

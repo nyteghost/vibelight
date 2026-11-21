@@ -1,8 +1,12 @@
 #include "streaming/sessionbitrate.h"
 #include <cassert>
 #include <cstdio>
+#include <type_traits>
 
 using namespace vibelight;
+static_assert(!std::is_copy_constructible<SessionBitrateController>::value,
+              "A session must not duplicate its live owner/cooldown timeline");
+
 constexpr auto automatic = BitrateProposalSource::ClientAutomatic;
 
 static void selection() {
@@ -42,7 +46,7 @@ static void singleOwnerAndCooldowns() {
     assert(stream.request(automatic, 10000, 5, false) == 30000);
     assert(stream.pending());
     assert(stream.confirmedKbps() == 50000); // Tentative, not acknowledged.
-    assert(stream.request(automatic, 30000, 5, false) == 0); // No second worker.
+    assert(stream.request(automatic, 15000, 5, false) == 0); // No second worker.
     assert(stream.complete(25000) == BitrateCompletion::Applied); // Host cap.
     assert(!stream.pending());
     assert(stream.complete(70000) == BitrateCompletion::Ignored); // Duplicate/stale result.

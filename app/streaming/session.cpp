@@ -1,4 +1,5 @@
 #include "settings/hostprofilestore.h"
+#include "settings/mousecapturestore.h"
 #include "streamcheckreport.h"
 #include "diagnosticzip.h"
 #include <QSaveFile>
@@ -1012,7 +1013,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_Preferences->absoluteMouseMode && !m_App.isAppCollectorGame) {
+    QSettings mouseSettings;
+    const bool unlockedMouse = WMUtils::isRunningDesktopEnvironment() &&
+                               vibelight::readKeepMouseUnlocked(mouseSettings);
+    if ((m_Preferences->absoluteMouseMode || unlockedMouse) && !m_App.isAppCollectorGame) {
         emitLaunchWarning(tr("Your selection to enable remote desktop mouse mode may cause problems in games."));
     }
 
@@ -2953,7 +2957,7 @@ void Session::exec()
     // We still capture in windowed absolute mode because it doesn't
     // constrain the motion of the cursor. This allows the user to
     // easily reposition or resize the window.
-    if (m_IsFullScreen || m_Preferences->absoluteMouseMode) {
+    if (m_IsFullScreen || m_InputHandler->isAbsoluteMouseMode()) {
         // HACK: For Wayland, we wait until we get the first SDL_WINDOWEVENT_ENTER
         // event where it seems to work consistently on GNOME. For other platforms,
         // especially where SDL may call SDL_RecreateWindow(), we must only capture

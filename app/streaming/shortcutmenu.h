@@ -97,7 +97,8 @@ private:
         KindToggleGraph, // show/hide the small latency graph
         KindPage,       // opens another page of the menu (see Item::target)
         KindBack,       // returns to the root page
-        KindInfo        // non-clickable message (for example a config error)
+        KindInfo,       // non-clickable message (for example a config error)
+        KindKeepMouseUnlocked // persistent desktop mouse override
     };
 
     struct Item {

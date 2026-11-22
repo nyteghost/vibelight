@@ -62,6 +62,8 @@ public:
     Q_INVOKABLE QString shortcutMenuHotkey();
     Q_INVOKABLE bool shortcutMenuAutoHide();
     Q_INVOKABLE void setShortcutMenuAutoHide(bool hide);
+    Q_INVOKABLE bool keepMouseUnlocked();
+    Q_INVOKABLE void setKeepMouseUnlocked(bool enabled);
     Q_INVOKABLE bool clipboardAutoSync();
     Q_INVOKABLE bool networkTestQueued();
     Q_INVOKABLE void queueNetworkTest(bool queued);

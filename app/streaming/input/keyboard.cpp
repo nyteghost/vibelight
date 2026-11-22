@@ -6,6 +6,7 @@
 #include <QSettings>
 
 #include "streaming/vibelight_logic.h"
+#include "settings/mousecapturestore.h"
 
 #define VK_0 0x30
 #define VK_A 0x41
@@ -84,7 +85,11 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         setCaptureActive(false);
 
         // Toggle mouse mode
-        m_AbsoluteMouseMode = !m_AbsoluteMouseMode;
+        m_MouseCapturePolicy.toggleMouseMode();
+        {
+            QSettings settings;
+            vibelight::saveKeepMouseUnlocked(settings, keepsMouseUnlocked());
+        }
 
         // Recapture input
         setCaptureActive(true);

@@ -1,4 +1,5 @@
 #include "streaming/networktestrequest.h"
+#include "settings/mousecapturestore.h"
 #include "systemproperties.h"
 #include "utils.h"
 
@@ -459,6 +460,18 @@ void SystemProperties::setShortcutMenuAutoHide(bool hide)
 bool SystemProperties::clipboardAutoSync()
 {
     return QSettings().value("vibelight/clipboardAutoSync", false).toBool();
+}
+
+bool SystemProperties::keepMouseUnlocked()
+{
+    QSettings settings;
+    return vibelight::readKeepMouseUnlocked(settings);
+}
+
+void SystemProperties::setKeepMouseUnlocked(bool enabled)
+{
+    QSettings settings;
+    vibelight::saveKeepMouseUnlocked(settings, enabled);
 }
 
 void SystemProperties::setClipboardAutoSync(bool enabled)

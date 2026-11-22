@@ -1397,7 +1397,7 @@ SettingsWorkspace {
 
                 WrappingCheckBox {
                     id: absoluteMouseCheck
-                    enabled: !keepMouseUnlockedCheck.checked
+                    enabled: !SystemProperties.hasDesktopEnvironment || !keepMouseUnlockedCheck.checked
                     hoverEnabled: true
                     width: parent.width
                     text: qsTr("Optimize mouse for remote desktop instead of games")

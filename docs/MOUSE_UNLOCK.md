@@ -57,6 +57,8 @@ Physical Windows/streaming behavior remains **unvalidated** until the owner runs
    Repeat; verify no trapping, misplaced host clicks or stuck keys/buttons.
 3. Open/close the shortcuts menu, resize the stream, and toggle borderless mode.
    Verify the pointer still crosses screens; include different monitor scaling.
+   Also test with the shortcuts button always visible: its On/Off label should
+   refresh after a toggle or the mouse-mode hotkey.
 4. Temporarily release/resume with Ctrl+Alt+Shift+Z. Verify resumed input stays
    unlocked. Disconnect/reconnect, then restart Vibelight and verify persistence.
 5. Turn Off and verify the prior mode returns; test game camera input. Test

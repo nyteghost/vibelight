@@ -1895,6 +1895,9 @@ void ShortcutMenu::handleClick(int x, int y)
         }
         else {
             m_RecaptureOnClose = false;
+            // The always-visible button must refresh live On/Off labels too,
+            // including changes made by a mouse-mode hotkey since last open.
+            rebuildItems();
             setExpanded(true);
         }
         return;

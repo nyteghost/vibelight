@@ -110,6 +110,7 @@ public final class TvStreamProbe extends Instrumentation {
         check("1920x1080".equals(p.getString("list_resolution", "")) && "60".equals(p.getString("list_fps", ""))
                 && p.getBoolean("checkbox_enable_hdr", false) && "forceh265".equals(p.getString("video_format", "")),
                 "profile changed a non-bitrate preference");
+        p.edit().putBoolean("checkbox_enable_hdr", false).putString("video_format", "auto").commit();
 
         runOnMainSync(() -> {
             TvStreamUi.onKey(a, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));

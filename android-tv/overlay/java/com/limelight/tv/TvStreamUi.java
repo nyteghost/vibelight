@@ -107,15 +107,21 @@ public final class TvStreamUi {
         h.stageList = Vibe.column(c, 6);
         h.stageList.setPadding(Vibe.dp(c, 28), Vibe.dp(c, 18), Vibe.dp(c, 28), Vibe.dp(c, 18));
         h.stageList.setBackground(Vibe.rounded(c, Vibe.BG2, Vibe.OUTLINE, Vibe.RADIUS_DP, 1));
-        col.addView(h.stageList);
+        col.addView(h.stageList, new LinearLayout.LayoutParams(Math.min(Vibe.dp(c, 680), contentWidth(c)), -2));
         h.actions = Vibe.row(c, 16);
         h.actions.setGravity(Gravity.CENTER);
-        col.addView(h.actions);
-        root.addView(col, Vibe.frame(-2, -2, Gravity.CENTER));
+        col.addView(h.actions, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(col, Vibe.frame(contentWidth(c), -2, Gravity.CENTER));
         h.connectView = root;
         a.addContentView(root, new ViewGroup.LayoutParams(-1, -1));
         renderStages(h);
         showConnectingActions(h);
+    }
+
+    /** LinearLayout ignores match-parent children when sizing a wrap-content column, so give it a width. */
+    private static int contentWidth(Context c) {
+        int screen = c.getResources().getDisplayMetrics().widthPixels;
+        return Math.min(Vibe.dp(c, 860), screen - Vibe.dp(c, 96));
     }
 
     private static void renderStages(Holder h) {
@@ -224,7 +230,8 @@ public final class TvStreamUi {
         h.ring.setMode(RingView.Mode.FAILED);
         h.title.setText(title);
         h.title.setTextColor(Vibe.ERROR);
-        String what = stage == null ? "" : "While " + h.stages.describeStage(stage).toLowerCase() + ".\n";
+        String label = stage == null ? "" : h.stages.describeStage(stage);
+        String what = label.isEmpty() ? "" : "Stopped at: " + label + ".\n";
         h.detail.setText(what + message);
         h.actions.removeAllViews();
         TextView retry = Vibe.button(a, "Try again", true, v -> retry(h));
@@ -248,12 +255,12 @@ public final class TvStreamUi {
         col.addView(h.title);
         h.detail = Vibe.text(c, "", Vibe.BODY, Vibe.TEXT2, false);
         h.detail.setGravity(Gravity.CENTER);
-        col.addView(h.detail, new LinearLayout.LayoutParams(Vibe.dp(c, 720), -2));
+        col.addView(h.detail);
         h.stageList = Vibe.column(c, 6);
         h.actions = Vibe.row(c, 16);
         h.actions.setGravity(Gravity.CENTER);
         col.addView(h.actions);
-        root.addView(col, Vibe.frame(-2, -2, Gravity.CENTER));
+        root.addView(col, Vibe.frame(contentWidth(c), -2, Gravity.CENTER));
         h.connectView = root;
         h.activity.addContentView(root, new ViewGroup.LayoutParams(-1, -1));
     }

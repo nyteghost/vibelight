@@ -205,7 +205,8 @@ public:
     // thread. Fills in the name the host saved it under, or a short explanation on failure.
     bool
     uploadFile(const QString& localPath, QString& savedName, QString& error,
-               std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr);
+               std::atomic<bool>* cancelled = nullptr, std::atomic<int>* progress = nullptr,
+               qint64 hostMaxBytes = 0);
 
     // Download the newest file from the host's explicitly shared receive
     // folder (requires the host's Download files permission). Call on a worker.

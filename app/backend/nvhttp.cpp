@@ -827,9 +827,11 @@ NvHTTP::setRuntimeBitrate(int bitrateKbps, int& appliedKbps, QString& error)
 
 bool
 NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error,
-                   std::atomic<bool>* cancelled, std::atomic<int>* progress)
+                   std::atomic<bool>* cancelled, std::atomic<int>* progress, qint64 hostMaxBytes)
 {
-    static const qint64 kMaxUploadBytes = 512LL * 1024 * 1024; // matches the host's limit
+    // Older hosts don't say their limit; 512 MB is what every Vibebeam release accepts
+    static const qint64 kDefaultMaxUploadBytes = 512LL * 1024 * 1024;
+    const qint64 kMaxUploadBytes = hostMaxBytes > 0 ? hostMaxBytes : kDefaultMaxUploadBytes;
 
     QFileInfo info(localPath);
     if (!info.exists() || !info.isFile()) {
@@ -838,7 +840,7 @@ NvHTTP::uploadFile(const QString& localPath, QString& savedName, QString& error,
         return false;
     }
     if (info.size() > kMaxUploadBytes) {
-        error = "it's larger than 512 MB";
+        error = "it's larger than the host's " + QString::number(kMaxUploadBytes / (1024 * 1024)) + " MB limit";
         qWarning() << "[file] not sent:" << error << "size=" << info.size();
         return false;
     }

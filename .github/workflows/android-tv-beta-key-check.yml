@@ -1,0 +1,29 @@
+name: Vibelight TV beta signing key check
+# Read-only check: does the cached test signing key used for the installed
+# Vibelight TV Beta (tv-beta-11001, certificate SHA-256 f7d1e840...) still exist?
+# It never generates, prints or uploads a key, and never publishes anything.
+on:
+  push:
+    branches: [beta/next-features-20261028]
+    paths: ['.github/workflows/android-tv-beta-key-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Look up cached beta test key (no download)
+        id: key
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/vibelight-tv-signing/debug.keystore
+          key: vibelight-tv-beta-debug-key-v1-arm64-v8a
+          lookup-only: true
+      - name: Report
+        run: |
+          if [ "${{ steps.key.outputs.cache-hit }}" = "true" ]; then
+            echo "BETA_KEY_PRESENT=yes" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "BETA_KEY_PRESENT=no" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

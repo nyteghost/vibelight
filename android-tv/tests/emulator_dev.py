@@ -112,7 +112,12 @@ try:
         try:
             instrument('TvStreamProbe', 'Stream UI checks passed:')
         finally:
-            subprocess.run(['adb', 'pull', f'/sdcard/Android/data/{pkg}/files/probe/.', str(out)], check=False)
+            # Probe screenshots live in the app's private files; a debuggable build allows run-as.
+            names = subprocess.run(['adb', 'shell', 'run-as', pkg, 'ls', 'files/probe'], capture_output=True, text=True).stdout.split()
+            for name in names:
+                if name.endswith('.png'):
+                    with (out / name).open('wb') as f:
+                        subprocess.run(['adb', 'exec-out', 'run-as', pkg, 'cat', 'files/probe/' + name], stdout=f, check=False)
 
         # Screen 2: PC picker (launcher). No PC exists on the emulator, so the empty state shows.
         start('com.limelight.tv.TvLauncherActivity')

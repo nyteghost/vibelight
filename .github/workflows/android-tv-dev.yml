@@ -145,9 +145,11 @@ jobs:
           arch: x86
           disable-animations: true
           script: python3 android-tv/tests/emulator_dev.py "${{ runner.temp }}/tv-output/Vibelight-TV-x86-${{ matrix.flavor }}.apk" "${{ runner.temp }}/tv-smoke" "${{ matrix.flavor }}"
-      - name: Remove decoded signing material
+      # Only the decoded permanent key is removed. The temporary key must stay on disk
+      # until the cache post-step saves it, or every run would sign with a new key.
+      - name: Remove decoded permanent signing key
         if: always()
-        run: rm -rf /tmp/vibelight-tv-signing
+        run: rm -f /tmp/vibelight-tv-signing/release.p12
       - name: Upload emulator evidence and lint report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

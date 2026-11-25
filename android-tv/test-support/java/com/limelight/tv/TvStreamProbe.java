@@ -145,7 +145,7 @@ public final class TvStreamProbe extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
-            dir = new File(getTargetContext().getExternalFilesDir(null), "probe");
+            dir = new File(getTargetContext().getFilesDir(), "probe");
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
             StringBuilder report = new StringBuilder();

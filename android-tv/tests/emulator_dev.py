@@ -109,6 +109,10 @@ try:
         adb('shell', 'appops', 'set', pkg, 'REQUEST_INSTALL_PACKAGES', 'allow')
         instrument('TvUpdateProbe', 'Update validation passed:')
         instrument('TvDesignProbe', 'Design checks passed:')
+        try:
+            instrument('TvStreamProbe', 'Stream UI checks passed:')
+        finally:
+            subprocess.run(['adb', 'pull', f'/sdcard/Android/data/{pkg}/files/probe/.', str(out)], check=False)
 
         # Screen 2: PC picker (launcher). No PC exists on the emulator, so the empty state shows.
         start('com.limelight.tv.TvLauncherActivity')

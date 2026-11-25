@@ -382,8 +382,21 @@ public final class TvStreamUi {
         Holder h = holder(a);
         if (h == null || !h.connected || h.failed) return false;
         if (!PreferenceManager.getDefaultSharedPreferences(a).getBoolean(SettingsCatalog.KEY_PANEL_COMBO, true)) return false;
+        return requestPanel(a);
+    }
+
+    /** Opens the panel when a stream is connected. Also used by the debug stream probe. */
+    public static boolean requestPanel(Activity a) {
+        final Holder h = holder(a);
+        if (h == null || !h.connected || h.failed) return false;
         a.runOnUiThread(() -> openPanel(h));
         return true;
+    }
+
+    /** Debug/test visibility: the open panel's view, or null. */
+    public static View panelView(Activity a) {
+        Holder h = holder(a);
+        return h == null || !h.panelOpen ? null : h.panel;
     }
 
     static void openPanel(final Holder h) {
@@ -443,15 +456,16 @@ public final class TvStreamUi {
         TextView resume = Vibe.button(a, "Resume", true, v -> closePanel(h, true));
         resume.setTag("first");
         p.addView(resume, full());
-        p.addView(Vibe.button(a, "Disconnect (game keeps running)", false, v -> { closePanel(h, false); h.finishedByUs = true; a.finish(); }), full());
+        p.addView(Vibe.button(a, "Disconnect", false, v -> { closePanel(h, false); h.finishedByUs = true; a.finish(); }), full());
+        p.addView(Vibe.text(a, "Your game keeps running on the PC.", Vibe.LABEL, Vibe.TEXT2, false));
         p.addView(Vibe.button(a, "Quit game…", false, v -> confirmQuit(h)), full());
 
         final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(a);
         int kbps = prefs.getInt(BitrateProfile.KEY_BITRATE, BitrateProfile.BALANCED.kbps);
-        p.addView(Vibe.text(a, "Quality — applies to the next stream", Vibe.LABEL, Vibe.TEXT2, true));
+        p.addView(Vibe.text(a, "Quality (Mbps), next stream", Vibe.LABEL, Vibe.TEXT2, true));
         for (final BitrateProfile prof : BitrateProfile.values()) {
             String mark = prof.kbps == kbps ? "✓  " : "";
-            p.addView(Vibe.button(a, mark + prof.label + " · " + prof.kbps / 1000 + " Mbps", false, v -> {
+            p.addView(Vibe.button(a, mark + prof.label + " · " + prof.kbps / 1000, false, v -> {
                 TvPrefs.applyBitrateOnly(a, prof);
                 Toast.makeText(a, prof.label + " will be used for the next stream", Toast.LENGTH_SHORT).show();
                 refreshPanel(h);
@@ -460,12 +474,12 @@ public final class TvStreamUi {
             }), full());
         }
         final boolean stats = prefs.getBoolean("checkbox_enable_perf_overlay", false);
-        p.addView(Vibe.button(a, "Statistics overlay: " + (stats ? "On" : "Off"), false, v -> {
+        p.addView(Vibe.button(a, "Stats overlay: " + (stats ? "On" : "Off"), false, v -> {
             prefs.edit().putBoolean("checkbox_enable_perf_overlay", !stats).apply();
             if (a instanceof Game) ((Game) a).vibeSetPerfOverlay(!stats);
             refreshPanel(h);
         }), full());
-        p.addView(Vibe.text(a, "Back closes this panel. Your game is not paused.", Vibe.LABEL, Vibe.TEXT2, false));
+        p.addView(Vibe.text(a, "Back closes this panel. The game is not paused.", Vibe.LABEL, Vibe.TEXT2, false));
     }
 
     private static LinearLayout.LayoutParams full() { return new LinearLayout.LayoutParams(-1, -2); }

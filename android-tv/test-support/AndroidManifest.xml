@@ -5,6 +5,13 @@
     <instrumentation android:name="com.limelight.tv.TvUpdateProbe"
         android:targetPackage="${applicationId}"
         android:label="TV updater verification and installer checks" />
+    <instrumentation android:name="com.limelight.tv.TvStreamProbe"
+        android:targetPackage="${applicationId}"
+        android:label="Connection screen and in-stream panel checks without a PC" />
+    <application>
+        <activity android:name="com.limelight.tv.TvPanelHostActivity" android:exported="false"
+            android:screenOrientation="landscape" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+    </application>
     <instrumentation android:name="com.limelight.tv.TvDesignProbe"
         android:targetPackage="${applicationId}"
         android:label="Vibelight TV design-system checks (text size, target size, dead ends)" />

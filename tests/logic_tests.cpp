@@ -2,6 +2,7 @@
 //   g++ -std=c++17 -Wall -Wextra -I app tests/logic_tests.cpp -o logic_tests && ./logic_tests
 
 #include "streaming/vibelight_logic.h"
+#include "settings/hostprofile.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,38 @@ static void expectKey(char c, unsigned short vk, bool shift)
                     (c >= 32 && c < 127) ? c : '?', (unsigned char)c, ok, gotVk, gotShift, vk, shift);
         g_failures++;
     }
+}
+
+static void testIdleSessionGuard()
+{
+    using vibelight::IdleSessionGuard;
+    CHECK(IdleSessionGuard::idleTimeoutMs == 30u * 60u * 1000u);
+    CHECK(IdleSessionGuard::responseTimeoutMs == 2u * 60u * 1000u);
+    const std::uint32_t start = 1000;
+    IdleSessionGuard guard(start);
+    CHECK(!guard.needsPrompt(start));
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs - 1));
+    guard.noteInput(start + 10000);
+    CHECK(!guard.needsPrompt(start + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t deadline = start + 10000 + IdleSessionGuard::idleTimeoutMs;
+    CHECK(guard.needsPrompt(deadline));
+    guard.promptOpened(deadline);
+    CHECK(!guard.needsPrompt(deadline));
+    CHECK(guard.responseSecondsLeft(deadline) == 120u);
+    guard.noteInput(deadline + 5000);
+    CHECK(!guard.promptExpired(deadline + 119999));
+    CHECK(guard.responseSecondsLeft(deadline + 119999) == 1u);
+    CHECK(guard.promptExpired(deadline + 120000));
+    guard.confirmed(deadline + 120000);
+    CHECK(!guard.needsPrompt(deadline + 120000));
+    CHECK(guard.needsPrompt(deadline + 120000 + IdleSessionGuard::idleTimeoutMs));
+    const std::uint32_t nearWrap = 0xfffffff0u;
+    IdleSessionGuard wrap(nearWrap);
+    CHECK(!wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs - 1u));
+    CHECK(wrap.needsPrompt(nearWrap + IdleSessionGuard::idleTimeoutMs));
+    wrap.promptOpened(nearWrap + IdleSessionGuard::idleTimeoutMs);
+    CHECK(wrap.promptExpired(nearWrap + IdleSessionGuard::idleTimeoutMs +
+                             IdleSessionGuard::responseTimeoutMs));
 }
 
 static void testKeys()
@@ -92,6 +125,130 @@ static void testKeys()
     CHECK(!vibelight::asciiToKey((char)0xC3, vk, shift));
 }
 
+static void testAnalyzeConnection()
+{
+    using namespace vibelight;
+    ConnectionSample s;
+    s.currentMbps = 50; s.receivedMbps = 50; s.rttMs = 20; s.fps = 60;
+
+    // Clean: same advice as the simple rule
+    BitrateAdvice a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::None);
+    CHECK(a.mbps == 63);
+
+    // Network loss: back off, blame the network
+    s.dropPercent = 5.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Network);
+    CHECK(a.mbps == 30);
+
+    // Slow decoding with a clean network: keep the bitrate, blame the PC
+    s.dropPercent = 0.0; s.avgDecodeMs = 15.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Decoder);
+    CHECK(a.mbps == 50);
+
+    // Frames dropped before display with a clean network
+    s.avgDecodeMs = 4.0; s.pacerDropPercent = 3.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Decoder);
+
+    // Loss wins over decoder suspicion (the network is the first thing to fix)
+    s.dropPercent = 4.0;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Network);
+
+    // Unsteady path without loss: hold and shave 10%
+    s.dropPercent = 0.0; s.pacerDropPercent = 0.0; s.rttMs = 40; s.rttVarianceMs = 25;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::Jitter);
+    CHECK(a.mbps == 45);
+
+    // Small variance next to a long ping is normal
+    s.rttMs = 120; s.rttVarianceMs = 20;
+    a = analyzeConnection(s);
+    CHECK(a.bottleneck == Bottleneck::None);
+}
+
+static void testAutoBitrate()
+{
+    using vibelight::AutoBitrateController;
+    AutoBitrateController c(50);
+    unsigned long long t = 1000;
+
+    // Clean at the ceiling: nothing to do
+    CHECK(c.update(t += 5000, 0.0, false) == 0);
+
+    // Heavy loss: cut to 60% right away
+    CHECK(c.update(t += 5000, 5.0, false) == 30);
+    // Another heavy window inside the 8 s cooldown: wait
+    CHECK(c.update(t += 5000, 5.0, false) == 0);
+    // After the cooldown a heavy window cuts again
+    CHECK(c.update(t += 5000, 5.0, false) == 18);
+    // Never below a quarter of the ceiling (12.5 -> 13 after rounding)
+    for (int i = 0; i < 6; i++) c.update(t += 9000, 8.0, false);
+    CHECK(c.currentMbps() >= 12.5);
+    CHECK(c.currentMbps() <= 13.0);
+
+    // Clean for a while: climbs slowly, never above the ceiling
+    AutoBitrateController d(50);
+    t = 1000;
+    CHECK(d.update(t += 5000, 5.0, false) == 30);
+    // Holds for the 60 s after a cut even if clean
+    for (int i = 0; i < 10; i++) CHECK(d.update(t += 5000, 0.0, false) == 0);
+    // then raises in small steps
+    double raised = 0;
+    for (int i = 0; i < 40 && raised == 0; i++) raised = d.update(t += 5000, 0.0, false);
+    CHECK(raised > 30 && raised <= 34);
+    for (int i = 0; i < 400; i++) d.update(t += 5000, 0.0, false);
+    CHECK(d.currentMbps() == 50);
+
+    // One lossy window alone doesn't cut; two in a row do
+    AutoBitrateController e(50);
+    t = 1000;
+    CHECK(e.update(t += 5000, 2.0, false) == 0);
+    CHECK(e.update(t += 5000, 2.0, false) == 40);
+    // A lossy window followed by a clean one resets the streak
+    AutoBitrateController f(50);
+    t = 1000;
+    CHECK(f.update(t += 5000, 2.0, false) == 0);
+    CHECK(f.update(t += 5000, 0.0, false) == 0);
+    CHECK(f.update(t += 5000, 2.0, false) == 0);
+
+    // A decoder-bound stream is left alone
+    AutoBitrateController g(50);
+    t = 1000;
+    CHECK(g.update(t += 5000, 6.0, true) == 0);
+    CHECK(g.currentMbps() == 50);
+}
+
+static void testAutoBitrateAcknowledgment()
+{
+    using vibelight::AutoBitrateController;
+
+    // The host may apply a lower value than we requested. The next
+    // decision must be computed from the host's confirmed value.
+    AutoBitrateController clamped(50);
+    CHECK(clamped.update(6000, 5.0, false) == 30);
+    clamped.syncAppliedMbps(20);
+    CHECK(clamped.currentMbps() == 20);
+    CHECK(clamped.update(15000, 5.0, false) == 12.5);
+
+    // When the request fails, restore the previous confirmed bitrate so
+    // subsequent cuts don't compound a change that never happened.
+    AutoBitrateController rejected(50);
+    CHECK(rejected.update(6000, 5.0, false) == 30);
+    rejected.syncAppliedMbps(50);
+    CHECK(rejected.currentMbps() == 50);
+    CHECK(rejected.update(15000, 5.0, false) == 30);
+
+    // Bad or unexpectedly high reports must not corrupt the controller.
+    rejected.syncAppliedMbps(0);
+    CHECK(rejected.currentMbps() == 30);
+    rejected.syncAppliedMbps(100);
+    CHECK(rejected.currentMbps() == 50);
+}
+
 static void testBitrate()
 {
     using vibelight::suggestBitrateMbps;
@@ -149,7 +306,7 @@ static void testHotkey()
     CHECK(sanitizeMenuHotkey("!") == 'H');
 
     // Letters already used by other actions are refused
-    const char* taken = "QZXSMCDVLEK";
+    const char* taken = "QZXSMCDVLEKU";
     for (const char* p = taken; *p != '\0'; p++) {
         CHECK(sanitizeMenuHotkey(std::string(1, *p)) == 'H');
         CHECK(sanitizeMenuHotkey(std::string(1, (char)(*p - 'A' + 'a'))) == 'H');
@@ -164,10 +321,29 @@ static void testHotkey()
     CHECK(offered + (int)std::string(taken).size() == 26);
 }
 
+static void testHostProfileBounds()
+{
+    using vibelight::HostProfile;
+    CHECK(HostProfile().valid());
+    CHECK((HostProfile{256, 8192, 10, 500, false}.valid()));
+    CHECK((HostProfile{8192, 256, 9999, 150000, true}.valid()));
+    CHECK(!(HostProfile{255, 1080, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 8193, 60, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 0, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 10000, 20000, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 499, false}.valid()));
+    CHECK(!(HostProfile{1920, 1080, 60, 150001, false}.valid()));
+}
+
 int main()
 {
+    testHostProfileBounds();
     testKeys();
+    testIdleSessionGuard();
     testBitrate();
+    testAutoBitrate();
+    testAutoBitrateAcknowledgment();
+    testAnalyzeConnection();
     testHotkey();
 
     if (g_failures == 0) {

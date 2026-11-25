@@ -1,6 +1,13 @@
 #include "computermodel.h"
 
 #include <QThreadPool>
+#include <QThread>
+#include <QSettings>
+#include <QPointer>
+#include <QCoreApplication>
+#include <memory>
+#include "backend/nvhttp.h"
+#include "settings/hostprofilestore.h"
 
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
@@ -42,6 +49,13 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->state == NvComputer::CS_UNKNOWN;
     case ServerSupportedRole:
         return computer->isSupportedServerVersion;
+    case ProfileSummaryRole: {
+        QSettings settings;
+        const auto stored = vibelight::readHostProfile(settings, computer->uuid);
+        if (!stored.valid) return stored.exists ? tr("Global defaults (profile invalid)") : tr("Global defaults");
+        return tr("%1×%2 · %3 FPS · %4 Mbps").arg(stored.profile.width).arg(stored.profile.height)
+            .arg(stored.profile.fps).arg(stored.profile.bitrateKbps / 1000.0, 0, 'g', 4);
+    }
     case DetailsRole: {
         QString state, pairState;
 
@@ -110,6 +124,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[DetailsRole] = "details";
+    names[ProfileSummaryRole] = "profileSummary";
 
     return names;
 }
@@ -243,3 +258,186 @@ void ComputerModel::handleComputerStateChanged(NvComputer* computer)
 }
 
 #include "computermodel.moc"
+
+bool ComputerModel::supportsHostTwoFactorPreflight(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return false;
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->state == NvComputer::CS_ONLINE &&
+           computer->pairState == NvComputer::PS_PAIRED &&
+           computer->vibebeamFeatures.contains("2fa-preflight");
+}
+
+void ComputerModel::cancelTwoFactorForComputer(int computerIndex)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return;
+    ++m_TwoFactorRequestGenerations[m_Computers[computerIndex]->uuid];
+}
+
+void ComputerModel::checkTwoFactorForComputer(int computerIndex, QString code)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count() ||
+        !supportsHostTwoFactorPreflight(computerIndex)) {
+        emit twoFactorCheckCompleted(computerIndex, 0,
+                                     tr("This host does not support early two-factor verification."));
+        return;
+    }
+    NvComputer* computer = m_Computers[computerIndex];
+    const QString uuid = computer->uuid;
+    const NvAddress address = computer->activeAddress;
+    const uint16_t httpsPort = computer->activeHttpsPort;
+    const QSslCertificate cert = computer->serverCert;
+    const bool trueUid = !computer->isNvidiaServerSoftware;
+    const quint64 generation = ++m_TwoFactorRequestGenerations[uuid];
+
+    // The worker never reads a mutable host pointer or the model.
+    const auto modelGuard = std::make_shared<QPointer<ComputerModel>>(this);
+    QThread* thread = QThread::create([modelGuard, uuid, generation, address, httpsPort,
+                                      cert, trueUid, code = std::move(code)]() {
+        NvHTTP http(address, httpsPort, cert, trueUid);
+        QString error;
+        const int status = http.checkHostTwoFactor(code, error);
+        if (auto* app = QCoreApplication::instance()) {
+            QMetaObject::invokeMethod(app, [modelGuard, uuid, generation, status, error]() {
+                ComputerModel* model = modelGuard->data();
+                if (!model || model->m_TwoFactorRequestGenerations.value(uuid) != generation) return;
+                for (int row = 0; row < model->m_Computers.size(); ++row) {
+                    NvComputer* candidate = model->m_Computers[row];
+                    if (candidate && candidate->uuid == uuid) {
+                        // Fail closed if this is no longer the same paired, online host.
+                        if (!model->supportsHostTwoFactorPreflight(row)) {
+                            emit model->twoFactorCheckCompleted(row, 0,
+                                ComputerModel::tr("The host disconnected or changed during verification."));
+                        } else {
+                            emit model->twoFactorCheckCompleted(row, status, error);
+                        }
+                        return;
+                    }
+                }
+                model->m_TwoFactorRequestGenerations.remove(uuid);
+            }, Qt::QueuedConnection);
+        }
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void ComputerModel::chooseMonitorForComputer(int computerIndex)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return;
+    }
+
+    NvComputer* computer = m_Computers[computerIndex];
+    const QString computerUuid = computer->uuid;
+    const QString current = QSettings().value("vibelight/monitor/" + computerUuid).toString();
+    if (!computer->vibebeamFeatures.contains("monitors")) {
+        emit monitorsReady(computerIndex, QStringList(), QStringList(), current,
+                           tr("This PC doesn't offer a monitor choice. It needs Vibebeam beta.9 or newer."));
+        return;
+    }
+
+    const NvAddress address = computer->activeAddress;
+    const uint16_t httpsPort = computer->activeHttpsPort;
+    const QSslCertificate serverCert = computer->serverCert;
+    const bool useTrueUid = !computer->isNvidiaServerSoftware;
+    const quint64 requestGeneration = ++m_MonitorRequestGenerations[computerUuid];
+
+    // Hold a weak QObject guard indirectly so that the worker does not access
+    // the model, its rows, or its QObject lifetime from another thread.
+    // The QPointer itself is only inspected on the GUI thread.
+    const auto modelGuard = std::make_shared<QPointer<ComputerModel>>(this);
+    QThread* thread = QThread::create([modelGuard, computerUuid, requestGeneration, current,
+                                      address, httpsPort, serverCert, useTrueUid]() {
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        QStringList ids, names;
+        QString error;
+        if (!http.getMonitors(ids, names, error)) {
+            error = ComputerModel::tr("Couldn't get the monitor list: %1").arg(error);
+        }
+        else if (ids.isEmpty()) {
+            error = ComputerModel::tr("The host didn't report any monitors to choose from.");
+        }
+
+        // Never post to a potentially deleted model; this application receiver
+        // owns the queued callback and drops it during application shutdown.
+        if (auto* app = QCoreApplication::instance()) {
+            QMetaObject::invokeMethod(app, [modelGuard, computerUuid, requestGeneration,
+                                            ids, names, current, error]() {
+                ComputerModel* model = modelGuard->data();
+                if (!model || model->m_MonitorRequestGenerations.value(computerUuid) != requestGeneration) {
+                    return;  // model destroyed or a newer request superseded this result
+                }
+
+                // The row can change while the HTTPS request runs. Find the
+                // original host by its stable UUID, not the captured row number.
+                for (int row = 0; row < model->m_Computers.size(); ++row) {
+                    NvComputer* candidate = model->m_Computers[row];
+                    if (candidate && candidate->uuid == computerUuid) {
+                        emit model->monitorsReady(row, ids, names, current, error);
+                        return;
+                    }
+                }
+                // The host was removed while the request was outstanding.
+                model->m_MonitorRequestGenerations.remove(computerUuid);
+            }, Qt::QueuedConnection);
+        }
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void ComputerModel::setMonitorForComputer(int computerIndex, QString monitorId)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return;
+    }
+    const QString key = "vibelight/monitor/" + m_Computers[computerIndex]->uuid;
+    if (monitorId.isEmpty()) {
+        QSettings().remove(key);
+    }
+    else {
+        QSettings().setValue(key, monitorId);
+    }
+}
+
+QVariantMap ComputerModel::profileForComputer(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return {};
+    auto computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    QSettings settings;
+    const auto stored = vibelight::readHostProfile(settings, computer->uuid);
+    const auto defaults = StreamingPreferences::get();
+    const auto profile = stored.valid ? stored.profile : vibelight::HostProfile{
+        defaults->width, defaults->height, defaults->fps, defaults->bitrateKbps,
+        settings.value("vibelight/autoBitrate", false).toBool()};
+    return {{"uuid", computer->uuid}, {"name", computer->name}, {"enabled", stored.valid},
+            {"invalid", stored.exists && !stored.valid}, {"width", profile.width}, {"height", profile.height},
+            {"fps", profile.fps}, {"bitrateKbps", profile.bitrateKbps}, {"adaptiveBitrate", profile.adaptiveBitrate},
+            {"monitor", settings.value("vibelight/monitor/" + computer->uuid).toString()}};
+}
+
+QString ComputerModel::saveProfileForComputer(QString uuid, QVariantMap values, bool enabled)
+{
+    bool known = false;
+    for (auto computer : m_Computers) {
+        QReadLocker lock(&computer->lock);
+        if (computer->uuid == uuid) { known = true; break; }
+    }
+    if (!known || vibelight::hostProfileKey(uuid).isEmpty()) return tr("This PC is no longer available. Reopen its profile.");
+    const auto object = QJsonObject::fromVariantMap(values);
+    const auto integer = [&object](const char* key) {
+        const auto value = object.value(QLatin1String(key));
+        return value.isDouble() ? value.toInt(-1) : -1;
+    };
+    const vibelight::HostProfile profile{integer("width"), integer("height"), integer("fps"), integer("bitrateKbps"), object.value("adaptiveBitrate").toBool()};
+    if (enabled && (!profile.valid() || !object.value("adaptiveBitrate").isBool())) return tr("Enter valid profile values before saving.");
+    QSettings settings;
+    if (!vibelight::writeHostProfile(settings, uuid, profile, enabled)) return tr("The profile could not be saved. Check local settings storage and try again.");
+    for (int row = 0; row < m_Computers.count(); ++row) {
+        if (m_Computers[row]->uuid == uuid) emit dataChanged(index(row), index(row), {ProfileSummaryRole});
+    }
+    return {};
+}

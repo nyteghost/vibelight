@@ -1,6 +1,7 @@
 #pragma once
 
 #include "settings/streamingpreferences.h"
+#include "settings/mousecapturepolicy.h"
 #include "backend/computermanager.h"
 
 #include "SDL_compat.h"
@@ -146,6 +147,10 @@ public:
 
     void setCaptureActive(bool active);
 
+    bool isAbsoluteMouseMode() const { return m_MouseCapturePolicy.absoluteMode(); }
+    bool keepsMouseUnlocked() const { return m_MouseCapturePolicy.keepUnlocked(); }
+    void setKeepMouseUnlocked(bool enabled);
+
     bool isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth = -1, int windowHeight = -1);
 
     void updateKeyboardGrabState();
@@ -168,6 +173,7 @@ public:
         KeyComboQuitAndExit,
         KeyComboToggleKeyboardGrab,
         KeyComboToggleShortcutMenu,
+        KeyComboPullClipboard,
         KeyComboMax
     };
 
@@ -255,7 +261,7 @@ private:
     SDL_TimerID m_LongPressTimer;
     int m_StreamWidth;
     int m_StreamHeight;
-    bool m_AbsoluteMouseMode;
+    vibelight::MouseCapturePolicy m_MouseCapturePolicy;
     bool m_AbsoluteTouchMode;
     bool m_DisabledTouchFeedback;
 

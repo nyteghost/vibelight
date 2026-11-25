@@ -4,6 +4,32 @@ Vibelight is a fork of [Moonlight PC](https://github.com/moonlight-stream/moonli
 
 > **This is an unofficial fork.** It is not affiliated with or endorsed by the Moonlight project. Please don't report problems with this fork to the upstream project. Upstream is licensed under GPLv3, and so is this fork (see [LICENSE](LICENSE)).
 
+## Vibelight TV — NVIDIA Shield TV Pro beta
+
+The Android TV client lives in [`android-tv/`](android-tv/README.md), independently
+of the Windows/Qt application. It has a native dark TV dashboard, paired game tiles,
+local discovery/manual IP, streaming profiles and the pinned Moonlight Android
+MediaCodec/audio/input foundation. The starting target is **4K60 HEVC at 50 Mbps**
+on wired Ethernet, with H.264 fallback and conditional opt-in HDR10.
+
+- **Download:** [TV beta prereleases](https://github.com/nyteghost/vibelight/releases).
+  Choose a `Vibelight TV Beta tv-beta-N` release and its arm64 APK. From TV 0.2.0,
+  **Updates → Check for beta updates** downloads/verifies a newer beta and opens
+  Android's installation prompt. One manual update enables this feature.
+  [Actions ZIP artifacts](https://github.com/nyteghost/vibelight/actions/workflows/android-tv.yml) remain available.
+- **Install, pair, update and troubleshoot:** [Shield TV guide](android-tv/docs/SHIELD_GUIDE.md).
+- **Architecture and compatibility:** [Android TV ADR](android-tv/docs/ARCHITECTURE.md).
+- **What is finished / still open:** [TV roadmap](android-tv/docs/ROADMAP.md),
+  [changelog](android-tv/CHANGELOG.md), [Obsidian note](android-tv/docs/OBSIDIAN.md).
+
+This is an unofficial GPLv3 Moonlight Android derivative with its own beta package
+identity. It coexists with Moonlight and does not replace the installed Vibebeam
+host. Physical Shield 4K60/HDR/input/audio/cleanup tests remain required; CI and
+emulator results do not prove streaming performance. PyroWave, live automatic
+bitrate changes, automatic health rollback and automatic reconnect are not included.
+Debug-signed beta updates require a matching signing certificate; see the guide.
+All TV development stays on `beta/next-features-20261028` until explicitly approved.
+
 ## Quick start
 1. Download the latest build (see [Downloads](#downloads)) and unzip it. Add an empty file named `portable.dat` next to `Vibelight.exe` if you want settings kept in that folder.
 2. Pair with your host the same way as in Moonlight and start a stream.
@@ -11,24 +37,29 @@ Vibelight is a fork of [Moonlight PC](https://github.com/moonlight-stream/moonli
 4. If something goes wrong, open **Settings → Support → Save diagnostics file** and send the file along with a description of what happened.
 
 ## Recommended host: Vibebeam
-Vibelight works with any Sunshine or GameStream host, but some features need a host that supports Apollo-style extras. The companion host is [Vibebeam](https://github.com/nyteghost/vibebeam), a fork of [Vibepollo](https://github.com/Nonary/Vibepollo) (itself based on Apollo and Sunshine). It is kept in step with Nonary's Vibepollo by a scheduled sync that opens a pull request when upstream changes, and its update checks use its own releases. Features that need such a host today: **Clipboard sync** (allow clipboard access for Vibelight in the host's web UI). Everything else works with stock Sunshine.
+Vibelight works with any Sunshine or GameStream host, but some features need a host that supports Apollo-style extras. The companion host is [Vibebeam](https://github.com/nyteghost/vibebeam), a fork of [Vibepollo](https://github.com/Nonary/Vibepollo) (itself based on Apollo and Sunshine). It is kept in step with Nonary's Vibepollo by a scheduled sync that opens a pull request when upstream changes, and its update checks use its own releases. Features that need such a host today: **Clipboard sync** (allow clipboard access for Vibelight in the host's web UI), **File drop**, and **Two-factor codes**. Everything else works with stock Sunshine.
+
+**Compatibility rule:** Vibelight and Vibebeam never need each other. Vibelight works with ordinary Sunshine, Apollo and GameStream hosts, and Vibebeam works with ordinary Moonlight clients (including Moonlight on iOS; give such a client **Exempt from 2FA** if the host requires 2FA). Extra features switch on only when the host advertises support for them (`VibebeamFeatures` in its server info), and a new feature must keep it that way.
 
 ## What's different from upstream Moonlight
 
 ### Floating "Shortcuts" button
 While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Alt+Shift+H** (you can change the H in **Settings → Input Settings → Shortcuts menu hotkey**; it applies from the next stream) to show it, open its menu and free the mouse. Press the hotkey again, press Esc, click outside the menu, or pick a shortcut to close the menu and hide the button again. If you would rather the button always stay on top of the stream, turn off **Settings → Input Settings → Hide the shortcuts button until I press the hotkey**: you then click the button to open the menu, and the hotkey hides and shows it. The button wears the Vibelight icon (coral disc, crescent moon and sparkles). The menu opens on a short **top level** with your pinned and recent shortcuts and a list of categories (Remote PC keys, Displays & windows, Vibelight controls, Tools & session, My shortcuts, Clipboard history). Click a category to open its page and click **Back** (or press Esc) to return; Esc on the top level closes the menu. Drag the button anywhere; Vibelight remembers where you put it. Opening the menu also frees the mouse, which is needed in relative mouse mode (to click the button while the mouse is captured, hold Ctrl+Alt+Z first). Esc is never sent to the remote PC while the menu is open.
 
+**Keep the mouse unlocked between screens:** enable **Settings → Mouse, keyboard & shortcuts → Keep mouse unlocked between screens**, or use the same On/Off option at the top of the in-stream shortcuts menu. The saved option uses desktop mouse control, so clicking back into the stream does not trap the pointer. Turn it off for games that need capture. See [usage and hardware checklist](docs/MOUSE_UNLOCK.md). Physical validation is pending.
+
 **Hold Ctrl+Alt+Z to release the mouse.** While you hold the left Ctrl and left Alt keys and press Z, the mouse is freed so you can move it outside the stream window. Let go and it is captured again (if the pointer is still over the window). The Z is not sent to the remote PC, and Ctrl+Alt+Shift shortcuts (including Ctrl+Alt+Shift+Z, the release/grab toggle) work the same. Turn it off in **Settings → Input Settings** ("Hold Ctrl+Alt+Z to release the mouse").
 
 **What's in the menu**
 - **Send to remote PC:** Ctrl+Alt+Del, Alt+Tab, Alt+F4, Task Manager (Ctrl+Shift+Esc), Win, Win+D, Win+E, Win+L, Win+R, Win+Tab, Win+Shift+S, Print Screen.
-- **Vibelight (Ctrl+Alt+Shift+key actions):** release/grab mouse (Z), fullscreen (X), performance stats (S), mouse mode (M), show/hide cursor (C), minimize (D), paste clipboard as typing (V), pointer region lock (L), system key capture (K), quit stream (Q), quit stream and exit app (E). The two quit actions need a second click to confirm.
+- **Vibelight (Ctrl+Alt+Shift+key actions):** release/grab mouse (Z), fullscreen (X), performance stats (S), mouse mode (M), show/hide cursor (U), get the host's clipboard (C), minimize (D), paste clipboard as typing (V), pointer region lock (L), system key capture (K), quit stream (Q), quit stream and exit app (E). The two quit actions need a second click to confirm.
 - **Displays & windows (sent to the remote PC):** projection modes (Win+P), move a window to the left or right monitor (Win+Shift+Left/Right), snap left/right (Win+Left/Right), maximize (Win+Up), reset the graphics driver (Win+Ctrl+Shift+B). These change windows and display modes on the remote PC. Choosing which monitor is *streamed* is a host setting (Sunshine/Vibepollo), not something the client can switch.
 - **Pinned & recent:** right-click any shortcut to pin it (up to 10, marked with `*`). Pinned shortcuts and your four most recently used ones appear in a column on the left.
 - **Custom shortcuts:** your own buttons on their own page, up to 28 entries (see below).
 - **Typing mode:** how "Paste clipboard as typing" (Ctrl+Alt+Shift+V), clipboard history entries and your custom text shortcuts reach the remote PC. **Unicode** (the default) sends the text itself, which works on Windows hosts in any keyboard layout. **Key presses** sends real key events for US-keyboard characters, which is what to use for terminals and Linux hosts, where Unicode input can be ignored or trigger shortcuts like GTK Inspector. It assumes a US layout on the host, and characters with no key (accents, emoji) are still sent as Unicode. Pick it in the menu under Vibelight controls → Typing mode (a small page with the two choices). The choice is remembered separately for each PC; PCs you haven't set yet use Unicode, except Linux hosts running Vibebeam, which default to Key presses (the host tells Vibelight which operating system it runs).
-- **Clipboard sync (text, both ways):** under **Clipboard** in the menu, **Send my clipboard to host** puts this PC's clipboard text on the host's clipboard, and **Get host clipboard** copies the host's clipboard text to this PC, so you can paste with a normal Ctrl+V on either side. It uses the clipboard feature of Apollo-style hosts such as **Vibepollo**; it won't work with stock Sunshine or GeForce Experience. On the host, allow clipboard access for this client in the host's web UI (the client's permissions). Text only; for files see File drop below.
-- **File drop (client to host):** drag a file from your desktop onto the stream window and Vibelight sends it to the host's receive folder in the background; the round button shows "Sending ..." and then "Sent ...". Several files are sent one after another. It needs a host running [Vibebeam](https://github.com/nyteghost/vibebeam) with **Upload files** allowed for this client in the host's web UI. The host saves into its `received-files` folder (setting `file_transfer_dir`), never overwrites an existing file, and accepts files up to 1 GB. Folders can't be sent yet, and there is no host-to-client file transfer yet. Log lines start with `[file]`.
+- **Clipboard sync (text, both ways):** under **Clipboard** in the menu, **Send my clipboard to host** puts this PC's clipboard text on the host's clipboard, and **Get host clipboard** copies the host's clipboard text to this PC, so you can paste with a normal Ctrl+V on either side. It uses the clipboard feature of Apollo-style hosts such as **Vibepollo**; it won't work with stock Sunshine or GeForce Experience. On the host, allow clipboard access for this client in the host's web UI (the client's permissions). Text only; for files see File drop below. **Automatic sync** (Settings, off by default) removes the menu step: a copy on either side reaches the other within a second or two while you stream, so plain Ctrl+C and Ctrl+V work. It sends everything you copy (including from a password manager) to the host, only text up to 1 MB, and never writes the text to the log.
+- **File drop (client to host):** drag a file from your desktop onto the stream window and Vibelight sends it to the host's receive folder in the background; the round button shows "Sending ..." and then "Sent ...". Several files are sent one after another. It needs a host running [Vibebeam](https://github.com/nyteghost/vibebeam) with **Upload files** allowed for this client in the host's web UI. The host saves into its `received-files` folder (setting `file_transfer_dir`), never overwrites an existing file, and accepts files up to 512 MB. Folders can't be sent yet, and there is no host-to-client file transfer yet. Log lines start with `[file]`.
+- **Two-factor code (Vibebeam hosts):** if the host owner turned on **Require 2FA to connect** (Devices page of the host's web UI), Vibelight asks for the six-digit code from the authenticator app whenever you start or resume a stream. A wrong code is refused (five wrong tries in a row pause that device for five minutes) and each code works once. A backup code also works, once. After you connect, a dropped stream can reconnect for about two minutes without asking again. Stock Moonlight apps can't type a code, so the host owner must mark them "Exempt from 2FA" on the host. Scripted launches need that exemption too.
 - **Clipboard history:** the last 10 things you copied on this PC, as a column on the right. Click one to type it on the remote PC. The list is kept in memory only, is never saved to disk, and is gone when the stream ends. **Clear history** empties it right away. Anything you copy while streaming can appear here, including passwords, so clear it if that matters.
 
 **Feedback and tools**
@@ -39,7 +70,7 @@ While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Al
 - **Host info:** the open menu's header shows the PC name, stream resolution and frame rate, and codec (for example `DESKTOP-PC  |  1920x1080@60  |  HEVC 10-bit`) when there is room.
 - **Screenshot of stream (Windows):** saves a PNG of the stream window to `Pictures\Vibelight`. The menu and graph hide first so they aren't in the picture. It copies what is on screen, so exclusive fullscreen or protected video can come out black.
 - **Latency graph (Windows):** a small click-through panel in the bottom-left corner with the last 60 seconds of round-trip time (blue line) and dropped frames (red bars). Toggle it from the menu; it is off by default.
-- **Check connection:** watches the stream for 10 seconds, reports how many frames the network dropped, and suggests a bitrate: lower if frames are being lost, higher if the connection is clean and the stream is using all the bitrate it's given, otherwise "good fit". This measures your real stream rather than running a speed test, so run it while something on screen is moving. The suggestion is saved, and Settings shows "Your last connection check suggested N Mbps" with a **Use** button under the bitrate slider.
+- **Run streaming check:** observes the stream for ten seconds and exports a redacted diagnostic ZIP. Choose remote/home LAN context, then use **Open diagnostic reports** and **Copy troubleshooting prompt**. It never applies bitrate changes. See the [streaming check guide](docs/STREAMING_CHECK.md) for measured fields, privacy, older-host behavior and manual checks.
 
 **Notes and limitations**
 - The button is available on Windows, macOS and X11. It is not shown on Wayland, KMS/DRM or Steam Link. Set the environment variable `ML_DISABLE_SHORTCUT_MENU` to turn it off.
@@ -48,7 +79,7 @@ While streaming, the small round **Shortcuts button** is hidden. Press **Ctrl+Al
 - This feature is new and has had limited testing, especially in exclusive fullscreen.
 
 ### Auto-reconnect
-If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 3 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
+If the connection drops in the middle of a stream (a Wi-Fi blip, the host stalling), Vibelight shows "Connection lost. Reconnecting..." and tries up to 5 times to resume the stream instead of returning to the PC list. If every attempt fails you get the usual error. It never triggers when you quit the stream yourself or the host ends the session, or for host-side problems like encoder errors. Turn it off with **Settings → Host Settings → Automatically reconnect if the stream drops**.
 
 ### Custom shortcuts
 Click **Edit custom shortcuts...** in the dropdown (or edit the file yourself) to add your own buttons. The file is `vibelight-shortcuts.json`. It lives in the app's config folder, or next to `Vibelight.exe` in portable mode. It is created the first time you open the menu. Changes show up the next time you press Ctrl+Alt+Shift+H, with no restart.
@@ -112,13 +143,13 @@ The **Sync upstream** workflow runs weekly (or by hand from the Actions tab). Wh
 Releases are optional. To publish one:
 
 1. Edit `app/version.txt` (for example `6.2.1`), update `app/whatsnew.txt` with what changed, and commit them.
-2. Tag and push: `git tag v6.2.1 && git push origin v6.2.1`.
+2. Either tag and push (`git tag v6.2.1 && git push origin v6.2.1`) or, on GitHub, open **Actions → Release → Run workflow** on `master`. The button uses the version in `app/version.txt` and creates the tag itself.
 3. The **Release** workflow builds the app and creates a GitHub Release with portable zips (`Vibelight-6.2.1-Windows-x64-portable.zip`, `...-arm64-...`) and a macOS `.dmg`. It stops early if the tag doesn't match `app/version.txt`.
 
 The in-app update indicator only shows something once a release like this exists with a higher version than the installed one.
 
 ## Downloads
-Until you publish a release, build artifacts come from GitHub Actions: open the **Actions** tab of this repository, pick a run of the **Build** workflow, and download the `Vibelight-Windows-x64-*` artifact. It is an unpacked folder. Branch pushes only build Windows x64 so they finish quickly; runs on `master` (and manual runs from the Actions tab: **Build → Run workflow**) also build Windows arm64, macOS, the Linux AppImage and Steam Link. Create an empty file called `portable.dat` next to `Vibelight.exe` to run it in portable mode, where settings are stored next to the program.
+Until you publish a release, build artifacts come from GitHub Actions: open the **Actions** tab of this repository, pick a run of the **Build** workflow, and download the `Vibelight-Windows-x64-*` artifact. It is an unpacked folder. Branch pushes only build Windows x64 so they finish quickly; runs on `master` (and manual runs from the Actions tab: **Build → Run workflow**) also build Windows arm64 and macOS. (The Linux AppImage and Steam Link builds are no longer run by CI.) Create an empty file called `portable.dat` next to `Vibelight.exe` to run it in portable mode, where settings are stored next to the program.
 
 ## Credits
 The changes in this fork (the floating Shortcuts button and its features, the update download, the card styling, diagnostics, the release and sync workflows, the rename, the icon and this README) were written with [Claude](https://claude.com) by Anthropic. Moonlight itself is the work of the Moonlight project and its contributors.
@@ -213,3 +244,23 @@ for different architectures, which handle building deps and extra linking for yo
 3. Send Pull Requests
 
 Check out our [website](https://moonlight-stream.org) for project links and information.
+
+### Bitrate lock (beta)
+
+In Settings, choose your video bitrate and enable **Lock bitrate (keep the
+selected target)** before starting a stream. This disables automatic adaptation
+even when a host profile enables it, and prevents resolution/FPS/color changes
+from resetting the global bitrate. Manual bitrate changes remain available.
+Host profiles retain their own selected target. Unlocking restores the saved
+automatic-adjustment preference. Changes apply to the next stream, not an
+already-running one. This locks the requested target, not the actual measured
+traffic: encoder behavior and host limits still apply.
+
+### Network check (beta)
+
+During a stream, open **Tools & session → Test network for bitrate**. The
+20-second passive check reports measured quality and, when conclusive, offers
+**Apply and lock X Mbps for this PC** for the next connection. See
+[network check instructions](docs/STREAMING_CHECK.md#network-check-and-host-bitrate-lock).
+This is not a maximum-bandwidth speed test; recommendations are conservative
+trial targets, not proven optimal settings.

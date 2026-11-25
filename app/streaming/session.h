@@ -1,11 +1,16 @@
 #pragma once
 
 #include <QSemaphore>
+#include "streamcheckreport.h"
+#include <QtGlobal>
 #include <QMutex>
+#include <QWaitCondition>
 #include <QThread>
 #include <QStringList>
 #include <string>
 #include <memory>
+#include <atomic>
+#include "streaming/sessionbitrate.h"
 #include <QQuickWindow>
 
 #include <Limelight.h>
@@ -115,12 +120,29 @@ public:
     // Auto-reconnect support (used by StreamSegue.qml)
     Q_INVOKABLE bool wantsReconnect() const;
     Q_INVOKABLE Session* createReconnectSession();
+
+    // Answer the host's two-factor prompt (see twoFactorNeeded())
+    Q_INVOKABLE void submitTwoFactorCode(QString code);
+    Q_INVOKABLE void cancelTwoFactor();
     Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
 
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
                         bool& isHdrSupported, QSize& maxResolution);
+
+    // True in the extra window opened from the shortcuts menu ("Open second monitor window").
+    // That window shows another monitor only: it never plays audio, reads gamepads, syncs the
+    // clipboard or changes the bitrate, so the first window stays the only one doing those.
+    static bool isSecondaryWindow()
+    {
+        static const bool secondary = qEnvironmentVariableIntValue("VIBELIGHT_SECONDARY") == 1;
+        return secondary;
+    }
+
+    // Starts a second Vibelight window streaming the host's Remote Monitor. Returns false with a
+    // short explanation if it can't be started.
+    bool openSecondMonitorWindow(QString& error);
 
     static Session* get()
     {
@@ -137,9 +159,14 @@ public:
     void setShouldExit(bool quitHostApp = false);
 
     void toggleShortcutMenu();
+    // Trigger the nonblocking confirmation without waiting five hours.
+    void requestIdlePromptTest() { m_TestIdlePrompt = true; }
 
     // Used by the shortcut menu's connection check
     bool getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot);
+
+    QJsonObject streamCheckContext() const;
+    std::shared_ptr<vibelight::CheckExportState> exportStreamingCheck(QJsonObject report);
 
     // "PC name  |  1920x1080@60  |  HEVC 10-bit", shown in the shortcut menu
     std::string getStreamSummary() const;
@@ -151,6 +178,13 @@ public:
     // Drag-and-drop: send a file dropped on the stream window to the host in the background.
     // The newest status line ("Sending a.txt...", "Sent a.txt") is picked up by the stream loop.
     void queueFileUpload(const QString& path);
+    // Download the newest host-shared file to Downloads/Vibelight on a worker.
+    void startDownloadNewestHostFile();
+    void startDownloadHostFile(const QString& name);
+    void requestHostFileList();
+    bool takeHostFileList(QStringList& files, QString& error);
+    void cancelFileTransfers();
+    QString transferProgressText();
     bool takeUploadMessage(std::string& message, unsigned int& durationMs);
 
     // Clipboard sync without blocking the stream loop: the request runs on a worker thread and
@@ -160,10 +194,20 @@ public:
     void startHostClipboardPull();
     bool takePulledClipboard(QString& text);
 
+    // Optional automatic clipboard sync (text only, both directions); see tickClipboardSync()
+    void tickClipboardSync();
+
+    // Optional automatic bitrate control while streaming; see tickAutoBitrate()
+    void tickAutoBitrate();
+    bool saveNetworkBitrateLock(int kbps);
+    bool hasHostBitrateLock() const;
+
     // How "paste as typing" sends text to this PC: Unicode text (default) or key presses.
     // Remembered per PC; PCs that were never set use the older global setting.
     bool typeAsKeyPresses() const;
     void setTypeAsKeyPresses(bool asKeys);
+    int getStreamFps() const { return m_StreamConfig.fps; }
+
     int getConfiguredBitrateKbps() const
     {
         return m_StreamConfig.bitrate;
@@ -177,6 +221,10 @@ signals:
     void connectionStarted();
 
     void displayLaunchError(QString text);
+
+    // The host wants a two-factor code before it starts or resumes the stream.
+    // The UI answers with submitTwoFactorCode() or cancelTwoFactor().
+    void twoFactorNeeded(QString message);
 
     void quitStarting();
 
@@ -305,6 +353,7 @@ private:
     bool m_UnexpectedTermination;
     bool m_StreamStarted = false;       // The SDL stream loop was entered
     bool m_IsReconnectAttempt = false;  // This session was created to resume a dropped one
+    bool m_ReconnectNeedsTwoFactor = false; // the host wants a code, which a background reconnect cannot ask for
     bool m_ReconnectEligible = false;   // The way this session ended is worth retrying
     SdlInputHandler* m_InputHandler;
     ShortcutMenu* m_ShortcutMenu;
@@ -313,20 +362,64 @@ private:
         QMutex lock;
         QStringList queue;
         bool running = false;
+        bool downloadBusy = false;
+        bool fileListBusy = false;
+        bool fileListReady = false;
+        QStringList availableFiles;
+        QString fileListError;
+        std::atomic<bool> uploadCancel {false};
+        std::atomic<bool> downloadCancel {false};
+        std::atomic<int> uploadPercent {-1};
+        std::atomic<int> downloadPercent {-1};
+        QString activeUploadName;
+        QString activeDownloadName;
         bool messageReady = false;
         std::string message;
         unsigned int messageMs = 0;
         bool clipboardBusy = false;
         bool pulledReady = false;
         QString pulledText;
+
+        // Result of the last automatic clipboard sync request (see startAutoClipboardOp)
+        bool autoDone = false;
+        bool autoFailed = false;
+        bool autoWasPull = false;
+        QString autoText;
+        QString autoError;
     };
+
+    void startAutoClipboardOp(bool pull, const QString& text);
+    bool m_ClipAutoEnabled = false;
+    bool m_AutoBrStarted = false;
+    std::unique_ptr<vibelight::SessionBitrateController> m_AutoBr;
+    unsigned int m_AutoBrNextTick = 0;
+    unsigned int m_AutoBrLastFrames = 0, m_AutoBrLastDropped = 0;
+    unsigned int m_AutoBrLastDecoded = 0, m_AutoBrLastPacerDropped = 0;
+    unsigned long long m_AutoBrLastDecodeUs = 0;
+    std::shared_ptr<std::atomic<int>> m_AutoBrResult;   // worker -> loop: 0 idle/none, >0 applied kbps, -1 failed (host can't), -2 busy
+    bool m_ClipAutoStarted = false;
+    bool m_ClipHostBaselined = false;
+    int m_ClipFailures = 0;
+    unsigned int m_ClipNextPull = 0;
+    unsigned int m_ClipNextCheck = 0;
+    QString m_ClipLastLocal;
+    QString m_ClipLastHost;
     std::shared_ptr<UploadState> m_Upload = std::make_shared<UploadState>();
     int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    bool m_TestIdlePrompt = false;
 
     bool m_AsyncConnectionSuccess;
+
+    bool promptForTwoFactorCode(const QString& message, QString& code);
+    QMutex m_TwoFactorMutex;
+    QWaitCondition m_TwoFactorWait;
+    QString m_TwoFactorCode;
+    bool m_TwoFactorAnswered = false;
+    bool m_TwoFactorCancelled = false;
+    bool m_TwoFactorAbort = false; // set once the session is interrupted so a pending prompt can't hang
     int m_PortTestResults;
 
     int m_ActiveVideoFormat;

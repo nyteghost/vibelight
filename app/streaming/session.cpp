@@ -1,7 +1,17 @@
+#include "settings/hostprofilestore.h"
+#include "settings/mousecapturestore.h"
+#include "streamcheckreport.h"
+#include "diagnosticzip.h"
+#include <QSaveFile>
+#include <QJsonDocument>
+#include <QDateTime>
+#include <QUuid>
+#include <QCoreApplication>
 #include "session.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "streaming/shortcutmenu.h"
+#include "streaming/idlepresenceprompt.h"
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
@@ -34,6 +44,9 @@
 
 #include <QtEndian>
 #include <QSettings>
+#include <QProcess>
+#include <QDeadlineTimer>
+#include <cstring>
 #include <QCoreApplication>
 #include <QThreadPool>
 #include <QThread>
@@ -45,6 +58,20 @@
 #include <QGuiApplication>
 #include <QCursor>
 #include <QScreen>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QLockFile>
+#include <QStandardPaths>
+
+#ifdef Q_OS_WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QQuickOpenGLUtils>
@@ -573,14 +600,14 @@ bool Session::populateDecoderProperties(SDL_Window* window)
 }
 
 Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences)
-    : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
+    : m_Preferences(preferences ? preferences->cloneForSession() : StreamingPreferences::get()->forHost(computer->uuid)),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
       m_App(app),
       m_Window(nullptr),
       m_VideoDecoder(nullptr),
       m_DecoderLock(SDL_CreateMutex()),
-      m_AudioMuted(false),
+      m_AudioMuted(isSecondaryWindow()),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_InputHandler(nullptr),
@@ -595,6 +622,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0)
 {
+    m_Preferences->setParent(this);
 }
 
 Session::~Session()
@@ -985,7 +1013,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_Preferences->absoluteMouseMode && !m_App.isAppCollectorGame) {
+    QSettings mouseSettings;
+    const bool unlockedMouse = WMUtils::isRunningDesktopEnvironment() &&
+                               vibelight::readKeepMouseUnlocked(mouseSettings);
+    if ((m_Preferences->absoluteMouseMode || unlockedMouse) && !m_App.isAppCollectorGame) {
         emitLaunchWarning(tr("Your selection to enable remote desktop mouse mode may cause problems in games."));
     }
 
@@ -1567,6 +1598,52 @@ void Session::notifyMouseEmulationMode(bool enabled)
     }
 }
 
+// Called in a non-main thread: ask the UI for a code and wait for the answer
+bool Session::promptForTwoFactorCode(const QString& message, QString& code)
+{
+    QMutexLocker locker(&m_TwoFactorMutex);
+    m_TwoFactorAnswered = false;
+    m_TwoFactorCancelled = false;
+    m_TwoFactorCode.clear();
+
+    if (m_TwoFactorAbort) {
+        return false;
+    }
+
+    emit twoFactorNeeded(message);
+
+    // Don't wait forever if someone walked away from the prompt
+    QDeadlineTimer deadline(3 * 60 * 1000);
+    while (!m_TwoFactorAnswered && !m_TwoFactorAbort) {
+        if (!m_TwoFactorWait.wait(&m_TwoFactorMutex, deadline)) {
+            m_TwoFactorCancelled = true;
+            break;
+        }
+    }
+
+    code = m_TwoFactorCode.simplified();
+    m_TwoFactorCode.clear();
+    return !m_TwoFactorAbort && !m_TwoFactorCancelled && !code.isEmpty();
+}
+
+void Session::submitTwoFactorCode(QString code)
+{
+    QMutexLocker locker(&m_TwoFactorMutex);
+    m_TwoFactorCode = code;
+    m_TwoFactorCancelled = false;
+    m_TwoFactorAnswered = true;
+    m_TwoFactorWait.wakeAll();
+}
+
+void Session::cancelTwoFactor()
+{
+    QMutexLocker locker(&m_TwoFactorMutex);
+    m_TwoFactorCode.clear();
+    m_TwoFactorCancelled = true;
+    m_TwoFactorAnswered = true;
+    m_TwoFactorWait.wakeAll();
+}
+
 class AsyncConnectionStartThread : public QThread
 {
 public:
@@ -1617,23 +1694,58 @@ bool Session::startConnectionAsync()
     }
 
     QString rtspSessionUrl;
+    QString twoFactorCode;
+    QString twoFactorMessage;
 
-    try {
-        NvHTTP http(m_Computer);
-        http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
-                      m_Computer->isNvidiaServerSoftware,
-                      m_App.id, &m_StreamConfig,
-                      enableGameOptimizations,
-                      m_Preferences->playAudioOnHost,
-                      m_InputHandler->getAttachedGamepadMask(),
-                      !m_Preferences->multiController,
-                      rtspSessionUrl);
-    } catch (const GfeHttpResponseException& e) {
-        emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
-        return false;
-    } catch (const QtNetworkReplyException& e) {
-        emit displayLaunchError(e.toQString());
-        return false;
+    // The monitor chosen for this PC in its right-click menu (Vibebeam hosts only)
+    QString monitorId;
+    // The second window shows the host's Remote Monitor and must never reuse the main window's choice
+    if (m_Computer->vibebeamFeatures.contains("monitors") && !isSecondaryWindow()) {
+        monitorId = QSettings().value("vibelight/monitor/" + m_Computer->uuid).toString();
+    }
+
+    for (int attempt = 0;; attempt++) {
+        try {
+            NvHTTP http(m_Computer);
+            // The second window starts the host's Remote Monitor with "launch". "resume" would just rejoin
+            // the running game and show the same screen as the main window.
+            http.startApp((m_Computer->currentGameId != 0 && !isSecondaryWindow()) ? "resume" : "launch",
+                          m_Computer->isNvidiaServerSoftware,
+                          m_App.id, &m_StreamConfig,
+                          enableGameOptimizations,
+                          m_Preferences->playAudioOnHost,
+                          m_InputHandler->getAttachedGamepadMask(),
+                          !m_Preferences->multiController,
+                          rtspSessionUrl,
+                          twoFactorCode,
+                          monitorId);
+            break;
+        } catch (const GfeHttpResponseException& e) {
+            // Vibebeam hosts answer 470 (code needed) or 471 (code refused) when two-factor is on.
+            // 472 means too many wrong codes, so asking again would not help.
+            if ((e.getStatusCode() == 470 || e.getStatusCode() == 471) && m_IsReconnectAttempt) {
+                // Nobody may be at the keyboard during an automatic reconnect, so never wait for a
+                // code here. Stop retrying and tell the user to connect again by hand.
+                m_ReconnectNeedsTwoFactor = true;
+                emit displayLaunchError(tr("The connection dropped and this PC now needs a two-factor code. Start the stream again and enter the code."));
+                return false;
+            }
+            if ((e.getStatusCode() == 470 || e.getStatusCode() == 471) && attempt < 5) {
+                twoFactorMessage = e.getStatusCode() == 471 ?
+                            tr("That code was not accepted. Enter a new six-digit code from your authenticator app, or a backup code.") :
+                            tr("This PC asks for a two-factor code. Enter the six-digit code from your authenticator app.");
+                if (!promptForTwoFactorCode(twoFactorMessage, twoFactorCode)) {
+                    // The user cancelled; go back quietly without an error dialog
+                    return false;
+                }
+                continue;
+            }
+            emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
+            return false;
+        } catch (const QtNetworkReplyException& e) {
+            emit displayLaunchError(e.toQString());
+            return false;
+        }
     }
 
     QByteArray hostnameStr = m_Computer->activeAddress.address().toUtf8();
@@ -1700,7 +1812,7 @@ bool Session::startConnectionAsync()
     // had if the host supported YUV444 (though obviously with 4:2:0 subsampling).
     // If the user has adjusted the bitrate from default, we'll assume they really wanted
     // that value and not second guess them.
-    if (m_Preferences->enableYUV444 &&
+    if (!m_Preferences->sessionBitrateLocked() && m_Preferences->enableYUV444 &&
         !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444) &&
         m_StreamConfig.bitrate == StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
                                                                           m_StreamConfig.height,
@@ -1764,6 +1876,7 @@ void Session::queueFileUpload(const QString& path)
             return; // the worker will pick it up
         }
         state->running = true;
+        state->uploadCancel.store(false);
     }
 
     // Copy what the host connection needs so the worker never touches the Session
@@ -1780,9 +1893,13 @@ void Session::queueFileUpload(const QString& path)
                 QMutexLocker locker(&state->lock);
                 if (state->queue.isEmpty()) {
                     state->running = false;
+                    state->activeUploadName.clear();
+                    state->uploadPercent.store(-1);
                     return;
                 }
                 path = state->queue.takeFirst();
+                state->activeUploadName = QFileInfo(path).fileName();
+                state->uploadPercent.store(0);
             }
 
             auto post = [&state](const QString& text, unsigned int ms) {
@@ -1797,7 +1914,8 @@ void Session::queueFileUpload(const QString& path)
 
             QString savedName, error;
             NvHTTP http(address, httpsPort, serverCert, useTrueUid);
-            if (http.uploadFile(path, savedName, error, hostMaxBytes)) {
+            if (http.uploadFile(path, savedName, error,
+                                &state->uploadCancel, &state->uploadPercent, hostMaxBytes)) {
                 post("Sent " + savedName + " to the host", 4000);
             }
             else {
@@ -1807,6 +1925,122 @@ void Session::queueFileUpload(const QString& path)
     });
     QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
+}
+
+void Session::startDownloadNewestHostFile()
+{
+    startDownloadHostFile(QString());
+}
+
+void Session::startDownloadHostFile(const QString& name)
+{
+    auto state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->downloadBusy) {
+            state->message = "A host file download is already in progress";
+            state->messageMs = 3000;
+            state->messageReady = true;
+            return;
+        }
+        state->downloadCancel.store(false);
+        state->downloadPercent.store(0);
+        state->downloadBusy = true;
+        state->activeDownloadName = name.isEmpty() ? "newest host file" : name;
+        state->message = ("Downloading " + state->activeDownloadName + "...").toStdString();
+        state->messageMs = 60000;
+        state->messageReady = true;
+    }
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid, name]() {
+        NvHTTP http(address, port, certificate, trueUid);
+        QString destination, error;
+        const bool ok = http.downloadHostFile(name, destination, error,
+                                               &state->downloadCancel, &state->downloadPercent);
+        QMutexLocker locker(&state->lock);
+        state->downloadBusy = false;
+        state->activeDownloadName.clear();
+        state->downloadPercent.store(-1);
+        state->message = ok ? ("Downloaded to " + destination).toStdString()
+                            : ("Host download: " + error).toStdString();
+        state->messageMs = ok ? 7000 : 8000;
+        state->messageReady = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void Session::requestHostFileList()
+{
+    auto state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->fileListBusy) return;
+        state->fileListBusy = true;
+        state->fileListReady = false;
+        state->availableFiles.clear();
+        state->fileListError.clear();
+    }
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid]() {
+        NvHTTP http(address, port, certificate, trueUid);
+        QStringList files;
+        QString error;
+        http.getHostFileList(files, error);
+        QMutexLocker locker(&state->lock);
+        state->availableFiles = files;
+        state->fileListError = error;
+        state->fileListReady = true;
+        state->fileListBusy = false;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+bool Session::takeHostFileList(QStringList& files, QString& error)
+{
+    QMutexLocker locker(&m_Upload->lock);
+    if (!m_Upload->fileListReady) return false;
+    files = m_Upload->availableFiles;
+    error = m_Upload->fileListError;
+    m_Upload->fileListReady = false;
+    return true;
+}
+
+void Session::cancelFileTransfers()
+{
+    auto state = m_Upload;
+    state->uploadCancel.store(true);
+    state->downloadCancel.store(true);
+    QMutexLocker locker(&state->lock);
+    state->queue.clear();
+    state->message = "Canceling active file transfers...";
+    state->messageMs = 4000;
+    state->messageReady = true;
+}
+
+QString Session::transferProgressText()
+{
+    QMutexLocker locker(&m_Upload->lock);
+    QStringList parts;
+    if (m_Upload->running) {
+        const int pct = m_Upload->uploadPercent.load();
+        parts << ("Upload " + m_Upload->activeUploadName +
+                  (pct < 0 ? QString() : " " + QString::number(pct) + "%"));
+    }
+    if (m_Upload->downloadBusy) {
+        const int pct = m_Upload->downloadPercent.load();
+        parts << ("Download " + m_Upload->activeDownloadName +
+                  (pct < 0 ? QString() : " " + QString::number(pct) + "%"));
+    }
+    return parts.join(" | ");
 }
 
 void Session::startHostClipboardPush(const QString& text)
@@ -1911,6 +2145,449 @@ void Session::startHostClipboardPull()
     thread->start();
 }
 
+void Session::startAutoClipboardOp(bool pull, const QString& text)
+{
+    std::shared_ptr<UploadState> state = m_Upload;
+    {
+        QMutexLocker locker(&state->lock);
+        if (state->clipboardBusy) {
+            return;
+        }
+        state->clipboardBusy = true;
+    }
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t httpsPort = m_Computer->activeHttpsPort;
+    const QSslCertificate serverCert = m_Computer->serverCert;
+    const bool useTrueUid = !m_Computer->isNvidiaServerSoftware;
+
+    QThread* thread = QThread::create([state, pull, text, address, httpsPort, serverCert, useTrueUid]() {
+        QString result, error;
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        bool ok;
+        if (pull) {
+            ok = http.getClipboardText(result, error);
+        }
+        else {
+            result = text;
+            ok = http.setClipboardText(text, error);
+        }
+
+        QMutexLocker locker(&state->lock);
+        state->clipboardBusy = false;
+        state->autoDone = true;
+        state->autoFailed = !ok;
+        state->autoWasPull = pull;
+        state->autoText = ok ? result : QString();
+        state->autoError = error;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+// The main and secondary stream run as separate processes. Keep only a lightweight
+// process ID per host so a second shortcut invocation does not create a duplicate.
+// On Windows, activate the existing stream window when possible.
+#ifdef Q_OS_WIN32
+namespace {
+quint64 secondaryProcessBirthTime(qint64 pid)
+{
+    if (pid <= 0 || pid > 0xFFFFFFFFLL) return 0;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (!process) return 0;
+    FILETIME created {}, exited {}, kernel {}, user {};
+    const bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user);
+    CloseHandle(process);
+    if (!ok) return 0;
+    ULARGE_INTEGER result {};
+    result.LowPart = created.dwLowDateTime;
+    result.HighPart = created.dwHighDateTime;
+    return result.QuadPart;
+}
+
+bool secondaryProcessIsRunning(qint64 pid, quint64 expectedBirth)
+{
+    if (pid <= 0 || pid > 0xFFFFFFFFLL || expectedBirth == 0) {
+        return false;
+    }
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                                 FALSE, static_cast<DWORD>(pid));
+    if (!process) {
+        return false;
+    }
+    FILETIME created {}, exited {}, kernel {}, user {};
+    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    const bool timed = running && GetProcessTimes(process, &created, &exited, &kernel, &user);
+    ULARGE_INTEGER born {};
+    born.LowPart = created.dwLowDateTime;
+    born.HighPart = created.dwHighDateTime;
+    wchar_t filename[32768] = {};
+    DWORD length = static_cast<DWORD>(sizeof(filename) / sizeof(filename[0]));
+    const bool identified = timed && born.QuadPart == expectedBirth &&
+                            QueryFullProcessImageNameW(process, 0, filename, &length);
+    CloseHandle(process);
+    return identified &&
+           QFileInfo(QString::fromWCharArray(filename, static_cast<int>(length))).canonicalFilePath()
+               .compare(QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath(),
+                        Qt::CaseInsensitive) == 0;
+}
+
+struct SecondaryWindowLookup {
+    DWORD pid;
+    HWND window = nullptr;
+};
+
+BOOL CALLBACK findSecondaryWindow(HWND hwnd, LPARAM context)
+{
+    auto* lookup = reinterpret_cast<SecondaryWindowLookup*>(context);
+    DWORD windowPid = 0;
+    GetWindowThreadProcessId(hwnd, &windowPid);
+    if (windowPid != lookup->pid || !IsWindowVisible(hwnd)) {
+        return TRUE;
+    }
+    wchar_t title[256] = {};
+    GetWindowTextW(hwnd, title, static_cast<int>(sizeof(title) / sizeof(title[0])));
+    if (QString::fromWCharArray(title).contains("Vibelight", Qt::CaseInsensitive)) {
+        lookup->window = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void focusSecondaryWindow(qint64 pid)
+{
+    SecondaryWindowLookup lookup {static_cast<DWORD>(pid), nullptr};
+    EnumWindows(findSecondaryWindow, reinterpret_cast<LPARAM>(&lookup));
+    if (!lookup.window) {
+        return; // The child process may still be creating its stream window.
+    }
+    if (IsIconic(lookup.window)) {
+        ShowWindow(lookup.window, SW_RESTORE);
+    }
+    SetForegroundWindow(lookup.window);
+}
+} // namespace
+#endif
+
+// Launch a separate client for the Remote Monitor, but prevent multiple
+// instances for the same host when the shortcut is clicked repeatedly.
+bool Session::openSecondMonitorWindow(QString& error)
+{
+    if (isSecondaryWindow()) {
+        error = tr("This is already the second window.");
+        return false;
+    }
+    if (m_Computer->vibebeamFeatures.isEmpty()) {
+        error = tr("A second monitor window needs a Vibebeam host.");
+        return false;
+    }
+
+    // The host's built-in app that streams an extra display; renamed hosts can change it here
+    const QString appName = QSettings().value("vibelight/secondMonitorApp", "Remote Monitor").toString();
+
+    const QString hostUuid = m_Computer->uuid;
+    QSettings settings;
+    const QString key = "vibelight/secondaryWindowPid/" + hostUuid;
+    const QString birthKey = "vibelight/secondaryWindowBirth/" + hostUuid;
+    const QString lockDirectory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (!QDir().mkpath(lockDirectory)) {
+        error = tr("Couldn't access the Vibelight runtime folder.");
+        return false;
+    }
+    const QString lockId = QString::fromLatin1(
+        QCryptographicHash::hash(hostUuid.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QLockFile launchLock(QDir(lockDirectory).filePath("secondary-" + lockId + ".lock"));
+    launchLock.setStaleLockTime(30000);
+    if (!launchLock.tryLock(0)) {
+        error = tr("Another Remote Monitor window launch is already in progress.");
+        return false;
+    }
+
+    settings.sync();
+#ifdef Q_OS_WIN32
+    const qint64 previousPid = settings.value(key).toLongLong();
+    const quint64 previousBirth = settings.value(birthKey).toULongLong();
+    if (secondaryProcessIsRunning(previousPid, previousBirth)) {
+        focusSecondaryWindow(previousPid);
+        error = tr("Focused the existing Remote Monitor window.");
+        return true;
+    }
+#endif
+    // A dead or reused PID is no longer evidence of an open Remote Monitor.
+    settings.remove(key);
+    settings.remove(birthKey);
+
+    QStringList args;
+    args << "stream" << hostUuid << appName
+         << "--display-mode" << "windowed"
+         << "--no-quit-after";
+
+    QProcess process;
+    process.setProgram(QCoreApplication::applicationFilePath());
+    process.setArguments(args);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("VIBELIGHT_SECONDARY", "1");
+    process.setProcessEnvironment(env);
+    qint64 launchedPid = 0;
+    if (!process.startDetached(&launchedPid)) {
+        error = tr("Couldn't start the second window (%1)").arg(process.errorString());
+        return false;
+    }
+    if (launchedPid > 0) {
+        settings.setValue(key, launchedPid);
+#ifdef Q_OS_WIN32
+        settings.setValue(birthKey, secondaryProcessBirthTime(launchedPid));
+#endif
+        settings.sync();
+    }
+    return true;
+}
+
+void Session::tickAutoBitrate()
+{
+    if (!m_AutoBrStarted) {
+        m_AutoBrStarted = true;
+        m_AutoBr.reset(new vibelight::SessionBitrateController(
+            m_StreamConfig.bitrate, m_Preferences->sessionBitratePolicy(),
+            isSecondaryWindow(), m_Computer->isNvidiaServerSoftware));
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Bitrate owner: %s; settings: %s",
+                    m_AutoBr->owner(), m_AutoBr->settingsSource());
+        if (m_AutoBr->active()) {
+            m_AutoBrResult = std::make_shared<std::atomic<int>>(0);
+            m_AutoBrNextTick = SDL_GetTicks() + 10000;   // let the stream settle first
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate is on (ceiling %d kbps)", m_StreamConfig.bitrate);
+        }
+    }
+    if (!m_AutoBr->active()) {
+        return;
+    }
+
+    // This runs on the SDL event-loop thread. Display bitrate messages without
+    // routing them through the shared file/clipboard status queue.
+    const auto showBitrateNotice = [this](const char* message, unsigned int ms) {
+        if (m_ShortcutMenu == nullptr) {
+            return;
+        }
+        const int position = QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt();
+        m_ShortcutMenu->showTransient(
+            message, ms,
+            position == 1 ? ShortcutMenu::TransientPlacement::BottomRight
+                          : ShortcutMenu::TransientPlacement::TopCenter);
+    };
+
+    const unsigned int now = SDL_GetTicks();
+    if (now - m_AutoBrNextTick >= 0x80000000u) {
+        return;
+    }
+    m_AutoBrNextTick = now + 5000;
+
+    // Reconcile only completed requests. Do not clear the busy marker (-2):
+    // the worker may still be updating this atomic on another thread.
+    int result = m_AutoBrResult->load();
+    if (result == -2) {
+        return;
+    }
+    if (result != 0) {
+        int expected = result;
+        if (!m_AutoBrResult->compare_exchange_strong(expected, 0)) {
+            return;
+        }
+
+        const int previousKbps = m_AutoBr->confirmedKbps();
+        const auto completion = m_AutoBr->complete(result);
+        if (completion == vibelight::BitrateCompletion::Paused) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
+            showBitrateNotice("Automatic bitrate paused: this host didn't accept the change", 7000);
+            return;
+        }
+        else if (completion == vibelight::BitrateCompletion::Applied) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: host confirmed %d kbps", result);
+            if (result != previousKbps) {
+                char buf[160];
+                SDL_snprintf(buf, sizeof(buf), "Bitrate %s to %.1f Mbps (host confirmed)",
+                             result < previousKbps ? "lowered" : "raised",
+                             result / 1000.0);
+                showBitrateNotice(buf, 4000);
+            }
+        }
+    }
+
+    CONNECTION_SNAPSHOT snap = {};
+    if (!getConnectionSnapshot(snap)) {
+        return;
+    }
+    const unsigned int frames = snap.totalFrames - m_AutoBrLastFrames;
+    const unsigned int dropped = snap.networkDroppedFrames - m_AutoBrLastDropped;
+    const unsigned int decoded = snap.decodedFrames - m_AutoBrLastDecoded;
+    const unsigned long long decodeUs = snap.totalDecodeTimeUs - m_AutoBrLastDecodeUs;
+    const unsigned int pacerDropped = snap.pacerDroppedFrames - m_AutoBrLastPacerDropped;
+    m_AutoBrLastFrames = snap.totalFrames;
+    m_AutoBrLastDropped = snap.networkDroppedFrames;
+    m_AutoBrLastDecoded = snap.decodedFrames;
+    m_AutoBrLastDecodeUs = snap.totalDecodeTimeUs;
+    m_AutoBrLastPacerDropped = snap.pacerDroppedFrames;
+
+    // A paused, minimized or idle stream says nothing about the connection
+    if (frames < 60) {
+        return;
+    }
+
+    vibelight::ConnectionSample sample;
+    sample.dropPercent = 100.0 * dropped / frames;
+    sample.fps = m_StreamConfig.fps;
+    if (decoded > 0) {
+        sample.avgDecodeMs = decodeUs / 1000.0 / decoded;
+        sample.pacerDropPercent = 100.0 * pacerDropped / decoded;
+    }
+    const double frameMs = 1000.0 / (sample.fps > 1.0 ? sample.fps : 60.0);
+    const bool decoderBound = sample.avgDecodeMs > frameMs * 0.8 ||
+                              (sample.pacerDropPercent >= 2.0 && sample.dropPercent < 1.0);
+
+    const int kbps = m_AutoBr->request(vibelight::BitrateProposalSource::ClientAutomatic,
+                                       now, sample.dropPercent, decoderBound);
+    if (kbps <= 0) {
+        return;
+    }
+
+    // The session controller reserves one request. Only this event-loop thread
+    // starts workers, and it consumes the prior result before requesting again.
+    m_AutoBrResult->store(-2);
+    // Do not update the confirmed bitrate or show a success message until
+    // setRuntimeBitrate() returns the host's applied value.
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: requesting %d kbps (%.1f%% dropped)", kbps, sample.dropPercent);
+
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t httpsPort = m_Computer->activeHttpsPort;
+    const QSslCertificate serverCert = m_Computer->serverCert;
+    const bool useTrueUid = !m_Computer->isNvidiaServerSoftware;
+    std::shared_ptr<std::atomic<int>> resultSlot = m_AutoBrResult;
+
+    QThread* thread = QThread::create([address, httpsPort, serverCert, useTrueUid, kbps, resultSlot]() {
+        NvHTTP http(address, httpsPort, serverCert, useTrueUid);
+        int applied = 0;
+        QString error;
+        if (http.setRuntimeBitrate(kbps, applied, error)) {
+            resultSlot->store(applied > 0 ? applied : kbps);
+        }
+        else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate change failed: %s", error.toUtf8().constData());
+            resultSlot->store(-1);
+        }
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void Session::tickClipboardSync()
+{
+    if (!m_ClipAutoStarted) {
+        m_ClipAutoStarted = true;
+        m_ClipAutoEnabled = !isSecondaryWindow() &&
+                            QSettings().value("vibelight/clipboardAutoSync", false).toBool() &&
+                            m_Computer->vibebeamFeatures.contains("clipboard") &&
+                            !m_Computer->isNvidiaServerSoftware;
+        if (m_ClipAutoEnabled) {
+            // Whatever is on the clipboard now was copied before the stream; don't send it
+            char* raw = SDL_HasClipboardText() ? SDL_GetClipboardText() : nullptr;
+            if (raw != nullptr) {
+                m_ClipLastLocal = QString::fromUtf8(raw);
+                SDL_free(raw);
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic clipboard sync is on");
+        }
+    }
+    if (!m_ClipAutoEnabled) {
+        return;
+    }
+
+    // The stream loop can spin very fast; look at the clipboards twice a second at most
+    const unsigned int checkNow = SDL_GetTicks();
+    if (checkNow - m_ClipNextCheck >= 0x80000000u) {
+        return;
+    }
+    m_ClipNextCheck = checkNow + 500;
+
+    // Finished request?
+    bool done = false, failed = false, wasPull = false;
+    QString text, error;
+    {
+        QMutexLocker locker(&m_Upload->lock);
+        if (m_Upload->autoDone) {
+            done = true;
+            failed = m_Upload->autoFailed;
+            wasPull = m_Upload->autoWasPull;
+            text = m_Upload->autoText;
+            error = m_Upload->autoError;
+            m_Upload->autoDone = false;
+        }
+    }
+    if (done) {
+        if (failed) {
+            if (++m_ClipFailures >= 3) {
+                m_ClipAutoEnabled = false;
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic clipboard sync paused: %s",
+                            error.toUtf8().constData());
+                QMutexLocker locker(&m_Upload->lock);
+                m_Upload->message = "Clipboard sync paused: " + error.toStdString();
+                m_Upload->messageMs = 7000;
+                m_Upload->messageReady = true;
+                return;
+            }
+        }
+        else {
+            m_ClipFailures = 0;
+            if (!wasPull) {
+                m_ClipLastHost = text; // the host now holds exactly what we sent
+            }
+            else if (!m_ClipHostBaselined) {
+                m_ClipHostBaselined = true; // what the host had before the stream; don't copy it over
+                m_ClipLastHost = text;
+            }
+            else if (!text.isEmpty() && text != m_ClipLastHost) {
+                m_ClipLastHost = text;
+                if (text != m_ClipLastLocal) {
+                    m_ClipLastLocal = text;
+                    SDL_SetClipboardText(text.toUtf8().constData());
+                    QMutexLocker locker(&m_Upload->lock);
+                    m_Upload->message = "Copied from the host's clipboard";
+                    m_Upload->messageMs = 1500;
+                    m_Upload->messageReady = true;
+                }
+            }
+        }
+    }
+
+    {
+        QMutexLocker locker(&m_Upload->lock);
+        if (m_Upload->clipboardBusy) {
+            return;
+        }
+    }
+
+    // New local copy? Send it (text only, a size limit, never just blank space)
+    const size_t kMaxSyncBytes = 1024 * 1024;
+    char* raw = SDL_HasClipboardText() ? SDL_GetClipboardText() : nullptr;
+    if (raw != nullptr) {
+        const QString local = QString::fromUtf8(raw);
+        const size_t size = strlen(raw);
+        SDL_free(raw);
+        if (local != m_ClipLastLocal) {
+            m_ClipLastLocal = local;
+            if (!local.trimmed().isEmpty() && size <= kMaxSyncBytes) {
+                startAutoClipboardOp(false, local);
+                return;
+            }
+        }
+    }
+
+    // Otherwise look at the host's clipboard every couple of seconds
+    const unsigned int now = SDL_GetTicks();
+    if (now - m_ClipNextPull < 0x80000000u) {
+        m_ClipNextPull = now + 2000;
+        startAutoClipboardOp(true, QString());
+    }
+}
+
 bool Session::takePulledClipboard(QString& text)
 {
     QMutexLocker locker(&m_Upload->lock);
@@ -1982,6 +2659,82 @@ std::string Session::getStreamSummary() const
     return parts.join("  |  ").toStdString();
 }
 
+bool Session::hasHostBitrateLock() const
+{
+    return QSettings().value("vibelight/hostBitrateLock/" + m_Computer->uuid.toUtf8().toHex(), false).toBool();
+}
+
+bool Session::saveNetworkBitrateLock(int kbps)
+{
+    if (isSecondaryWindow() || m_Computer->uuid.isEmpty()) return false;
+    QSettings settings;
+    const auto key = "vibelight/hostBitrateLock/" + m_Computer->uuid.toUtf8().toHex();
+    if (kbps == 0) {
+        settings.remove(key);
+    } else {
+        const auto stored = vibelight::readHostProfile(settings, m_Computer->uuid);
+        if (stored.exists && !stored.valid) return false; // Preserve malformed saved data.
+        auto profile = stored.valid ? stored.profile : vibelight::HostProfile{
+            m_Preferences->width, m_Preferences->height, m_Preferences->fps,
+            m_Preferences->bitrateKbps, m_Preferences->sessionAdaptiveBitrate()};
+        profile.bitrateKbps = kbps;
+        if (!vibelight::writeHostProfile(settings, m_Computer->uuid, profile, true)) return false;
+        settings.setValue(key, true);
+    }
+    settings.sync();
+    return settings.status() == QSettings::NoError;
+}
+
+QJsonObject Session::streamCheckContext() const
+{
+    const char* codec = (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_AV1) ? "AV1" :
+                        (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_H265) ? "HEVC" :
+                        (m_ActiveVideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "unknown";
+    return {{"codec", codec}, {"width", m_ActiveVideoWidth}, {"height", m_ActiveVideoHeight},
+            {"fps", m_ActiveVideoFrameRate}, {"client_configured_bitrate_kbps", m_StreamConfig.bitrate},
+            {"adaptive_bitrate_requested", m_Preferences->sessionAdaptiveBitrate()},
+            {"bitrate_settings_source", m_Preferences->sessionBitratePolicy().settingsSource()},
+            {"bitrate_owner", m_AutoBr ? m_AutoBr->owner() : "not_started"},
+            {"secondary_window", isSecondaryWindow()},
+            {"ten_bit", bool(m_ActiveVideoFormat & VIDEO_FORMAT_MASK_10BIT)}};
+}
+
+std::shared_ptr<vibelight::CheckExportState> Session::exportStreamingCheck(QJsonObject report)
+{
+    auto state = std::make_shared<vibelight::CheckExportState>();
+    const NvAddress address = m_Computer->activeAddress;
+    const uint16_t port = m_Computer->activeHttpsPort;
+    const QSslCertificate certificate = m_Computer->serverCert;
+    const bool trueUid = !m_Computer->isNvidiaServerSoftware;
+    report["client_version"] = QCoreApplication::applicationVersion();
+    QThread* thread = QThread::create([state, address, port, certificate, trueUid, report]() mutable {
+        QString path;
+        try {
+            NvHTTP http(address, port, certificate, trueUid);
+            report["host"] = vibelight::sanitizeCheckHost(http.streamingCheck());
+            const auto json = QJsonDocument(report).toJson(QJsonDocument::Indented);
+            const auto instructions = vibelight::checkPrompt() + "\nPrivacy: typed metrics only; raw logs, PC names, addresses, UUIDs and credentials are excluded.\nCapture CPU submission time is not end-to-end latency. Recent receive Mbps is a short rolling average. Network-dropped frames are not a packet-loss measurement. Audio, cursor, restoration and physical latency require confirmation.\n";
+            const auto zip = vibelight::diagnosticZip(json.toStdString(), instructions.toStdString());
+            const auto root = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+            const auto directory = root + "/Vibelight/Diagnostics";
+            if (!root.isEmpty() && !zip.empty() && QDir().mkpath(directory)) {
+                const auto name = "Streaming-check-" + QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss") + "-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".zip";
+                QSaveFile file(directory + "/" + name);
+                if (file.open(QIODevice::WriteOnly)) {
+                    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                    if (file.write(zip.data(), static_cast<qint64>(zip.size())) == static_cast<qint64>(zip.size()) && file.commit()) path = file.fileName();
+                }
+            }
+        } catch (...) {} // Export failure never changes stream/session handling.
+        QMutexLocker locker(&state->lock);
+        state->path = path;
+        state->done = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+    return state;
+}
+
 bool Session::getConnectionSnapshot(CONNECTION_SNAPSHOT& snapshot)
 {
     bool ok = false;
@@ -2048,6 +2801,13 @@ Session* Session::createReconnectSession()
 
 void Session::interrupt()
 {
+    // Wake the connection thread if it is waiting for a two-factor code
+    {
+        QMutexLocker locker(&m_TwoFactorMutex);
+        m_TwoFactorAbort = true;
+        m_TwoFactorWait.wakeAll();
+    }
+
     // Stop any connection in progress
     LiInterruptConnection();
 
@@ -2064,7 +2824,7 @@ void Session::exec()
     if (!m_AsyncConnectionSuccess) {
         // A failed attempt to resume a dropped stream is worth another try
         // (the host may still be waking up or the network coming back).
-        if (m_IsReconnectAttempt) {
+        if (m_IsReconnectAttempt && !m_ReconnectNeedsTwoFactor) {
             m_ReconnectEligible = true;
         }
 
@@ -2202,7 +2962,7 @@ void Session::exec()
     // We still capture in windowed absolute mode because it doesn't
     // constrain the motion of the cursor. This allows the user to
     // easily reposition or resize the window.
-    if (m_IsFullScreen || m_Preferences->absoluteMouseMode) {
+    if (m_IsFullScreen || m_InputHandler->isAbsoluteMouseMode()) {
         // HACK: For Wayland, we wait until we get the first SDL_WINDOWEVENT_ENTER
         // event where it seems to work consistently on GNOME. For other platforms,
         // especially where SDL may call SDL_RecreateWindow(), we must only capture
@@ -2250,8 +3010,64 @@ void Session::exec()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
+    // Activity is local keyboard/mouse/touch/controller input, not video or
+    // network traffic; every stream instance has its own watchdog.
+    const bool idleDisconnectEnabled =
+        QSettings().value("vibelight/idleDisconnectEnabled", true).toBool();
+    vibelight::IdleSessionGuard idleGuard(SDL_GetTicks());
+    IdlePresencePrompt idlePrompt;
+    Uint32 idlePromptRetryAt = 0;
+    bool idleRestoreCapture = false;
+
     SDL_Event event;
     for (;;) {
+        if (idleDisconnectEnabled) {
+            const Uint32 now = SDL_GetTicks();
+            if (idlePrompt.visible()) {
+                if (idleGuard.promptExpired(now)) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "Idle confirmation unanswered for 2 minutes; ending session");
+                    idlePrompt.close();
+                    cancelFileTransfers();
+                    // Host quitApp() is part of the existing graceful cleanup
+                    // and releases host-managed virtual displays. Do not quit
+                    // the host app from a detached secondary-monitor client.
+                    if (isSecondaryWindow()) {
+                        m_Preferences->quitAppAfter = false;
+                        setShouldExit(false);
+                    }
+                    else {
+                        setShouldExit(true);
+                    }
+                    goto DispatchDeferredCleanup;
+                }
+                idlePrompt.update(idleGuard.responseSecondsLeft(now));
+            }
+            else if ((idleGuard.needsPrompt(now) || m_TestIdlePrompt) &&
+                     (idlePromptRetryAt == 0 ||
+                      static_cast<Sint32>(now - idlePromptRetryAt) >= 0)) {
+                idleRestoreCapture = m_InputHandler->isCaptureActive();
+                m_InputHandler->raiseAllKeys();
+                m_InputHandler->setCaptureActive(false);
+                if (idlePrompt.show(m_Window)) {
+                    m_TestIdlePrompt = false;
+                    idleGuard.promptOpened(now);
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "Stream has had no local input for 30 minutes; showing confirmation");
+                }
+                else {
+                    // Never silently disconnect if we cannot display the
+                    // confirmation. Retry the overlay in one minute.
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Unable to show idle confirmation; retrying in 60 seconds");
+                    if (idleRestoreCapture) m_InputHandler->setCaptureActive(true);
+                    idlePromptRetryAt = now + 60000u;
+                }
+            }
+        }
+        tickClipboardSync();
+        tickAutoBitrate();
+
         // Expire short-lived button messages ("Sent: Alt+Tab")
         if (m_ShortcutMenu != nullptr) {
             m_ShortcutMenu->tick();
@@ -2277,7 +3093,8 @@ void Session::exec()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, (m_ShortcutMenu != nullptr && m_ShortcutMenu->needsTick()) ? 50 : 1000)) {
+        if (!SDL_WaitEventTimeout(&event, (idlePrompt.visible() ||
+            (m_ShortcutMenu != nullptr && m_ShortcutMenu->needsTick())) ? 50 : 1000)) {
             presence.runCallbacks();
             continue;
         }
@@ -2298,8 +3115,88 @@ void Session::exec()
             continue;
         }
 #endif
-        // Events that belong to the floating shortcut menu's own window must never
-        // reach the stream window / input handlers below.
+        // The response must be explicit. Ordinary input while the confirmation
+        // is displayed does not dismiss it or reach the host.
+        if (idlePrompt.visible()) {
+            const auto answer = idlePrompt.handleEvent(event);
+            if (answer == IdlePresencePrompt::Answer::Continue) {
+                idlePrompt.close();
+                idleGuard.confirmed(SDL_GetTicks());
+                if (idleRestoreCapture) m_InputHandler->setCaptureActive(true);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Idle presence confirmed; continuing streaming");
+                continue;
+            }
+            if (answer == IdlePresencePrompt::Answer::Disconnect) {
+                idlePrompt.close();
+                cancelFileTransfers();
+                if (isSecondaryWindow()) {
+                    m_Preferences->quitAppAfter = false;
+                    setShouldExit(false);
+                }
+                else {
+                    setShouldExit(true);
+                }
+                goto DispatchDeferredCleanup;
+            }
+            // The confirmation window is a real SDL window and also gets
+            // exposure/focus events; none should reach the stream renderer.
+            if (event.type == SDL_WINDOWEVENT &&
+                event.window.windowID == idlePrompt.windowId()) {
+                idlePrompt.update(idleGuard.responseSecondsLeft(SDL_GetTicks()));
+                continue;
+            }
+            switch (event.type) {
+            case SDL_KEYDOWN:
+            case SDL_KEYUP:
+            case SDL_TEXTINPUT:
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEMOTION:
+            case SDL_MOUSEWHEEL:
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            case SDL_CONTROLLERAXISMOTION:
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+                continue;
+            default:
+                break;
+            }
+        }
+        else if (idleDisconnectEnabled) {
+            // Do not count video frames, automatic clipboard or bitrate
+            // updates, joystick jitter, or system window/monitor events.
+            bool humanInput = false;
+            switch (event.type) {
+            case SDL_KEYDOWN:
+                humanInput = event.key.repeat == 0;
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEWHEEL:
+            case SDL_CONTROLLERBUTTONDOWN:
+            case SDL_CONTROLLERBUTTONUP:
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+                humanInput = true;
+                break;
+            case SDL_MOUSEMOTION:
+                humanInput = (event.motion.xrel != 0 || event.motion.yrel != 0);
+                break;
+            case SDL_CONTROLLERAXISMOTION:
+                humanInput = event.caxis.value > 8000 || event.caxis.value < -8000;
+                break;
+            default:
+                break;
+            }
+            if (humanInput) idleGuard.noteInput(SDL_GetTicks());
+        }
+
+        // Events belonging to the floating shortcuts window must never
+        // reach the stream input handlers below.
         if (m_ShortcutMenu != nullptr && m_ShortcutMenu->handleEvent(event)) {
             continue;
         }
@@ -2379,13 +3276,13 @@ void Session::exec()
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
-                if (m_Preferences->muteOnFocusLoss) {
+                if (m_Preferences->muteOnFocusLoss && !isSecondaryWindow()) {
                     m_AudioMuted = true;
                 }
                 m_InputHandler->notifyFocusLost();
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
-                if (m_Preferences->muteOnFocusLoss) {
+                if (m_Preferences->muteOnFocusLoss && !isSecondaryWindow()) {
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
@@ -2668,6 +3565,9 @@ void Session::exec()
     }
 
 DispatchDeferredCleanup:
+    // Explicitly destroy the idle overlay before the stream SDL window.
+    idlePrompt.close();
+
     // Switch back to synchronous logging mode
     StreamUtils::exitAsyncLoggingMode();
 

@@ -1,4 +1,4 @@
-import QtQuick 2.0
+import QtQuick 2.9
 import QtQuick.Controls 2.2
 import QtQuick.Window 2.2
 
@@ -8,6 +8,7 @@ import Session 1.0
 import SystemProperties 1.0
 
 Item {
+    id: streamSegue
     property Session session
     property string appName
     property string stageText : reconnectAttempt > 0 ? qsTr("Connection lost. Reconnecting (attempt %1 of %2)...").arg(reconnectAttempt).arg(maxReconnectAttempts) :
@@ -16,7 +17,31 @@ Item {
     property bool isResume : false
     property bool quitAfter : false
     property int reconnectAttempt : 0
-    readonly property int maxReconnectAttempts : 3
+    // Bounded, gradually increasing delays provide a roughly 30-second
+    // recovery opportunity without repeatedly hammering a temporarily
+    // unavailable host. wantsReconnect() still vetoes intentional exits.
+    readonly property int maxReconnectAttempts : 5
+    property bool reconnectCancelled : false
+    readonly property bool canCancelReconnect : reconnectDelayTimer.running && !streamLoader.active
+
+    function cancelReconnect()
+    {
+        // Cancellation is limited to the wait before initialize()/start().
+        // Never interrupt a running session or send a host quit request here.
+        if (!canCancelReconnect) {
+            return
+        }
+        reconnectCancelled = true
+        reconnectDelayTimer.stop()
+        sessionReadyForDeletion()
+        stackView.pop()
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        enabled: streamSegue.canCancelReconnect
+        onActivated: streamSegue.cancelReconnect()
+    }
 
     function stageStarting(stage)
     {
@@ -53,6 +78,12 @@ Item {
         console.error(text)
     }
 
+    function twoFactorNeeded(message)
+    {
+        twoFactorDialog.message = message
+        twoFactorDialog.open()
+    }
+
     function quitStarting()
     {
         // Avoid the push transition animation
@@ -65,7 +96,7 @@ Item {
 
     function tryReconnect()
     {
-        if (quitAfter || reconnectAttempt >= maxReconnectAttempts || !session || !session.wantsReconnect()) {
+        if (reconnectCancelled || quitAfter || reconnectAttempt >= maxReconnectAttempts || !session || !session.wantsReconnect()) {
             return false
         }
 
@@ -96,6 +127,11 @@ Item {
     {
         if (tryReconnect()) {
             return
+        }
+
+        if (reconnectAttempt >= maxReconnectAttempts && session && session.wantsReconnect()) {
+            var exhausted = qsTr("Vibelight could not restore the connection after %1 attempts. Your session has ended; check the host and reconnect when it is available.").arg(maxReconnectAttempts)
+            streamSegueErrorDialog.text = streamSegueErrorDialog.text ? streamSegueErrorDialog.text + "\n\n" + exhausted : exhausted
         }
 
         if (portTestResult !== 0 && portTestResult !== -1 && streamSegueErrorDialog.text) {
@@ -138,6 +174,8 @@ Item {
     }
 
     StackView.onDeactivating: {
+        // A popped/replaced page must not launch a pending retry in the background.
+        reconnectDelayTimer.stop()
         // Show the toolbar again when popped off the stack
         toolBar.visible = true
 
@@ -154,6 +192,7 @@ Item {
         session.stageFailed.connect(stageFailed)
         session.connectionStarted.connect(connectionStarted)
         session.displayLaunchError.connect(displayLaunchError)
+        session.twoFactorNeeded.connect(twoFactorNeeded)
         session.quitStarting.connect(quitStarting)
         session.sessionFinished.connect(sessionFinished)
         session.readyForDeletion.connect(sessionReadyForDeletion)
@@ -174,8 +213,17 @@ Item {
 
     Timer {
         id: reconnectDelayTimer
-        interval: 2500
-        onTriggered: streamLoader.active = true
+        interval: Math.min(8000, 2000 * reconnectAttempt)
+        onTriggered: {
+            if (!reconnectCancelled && session) {
+                streamLoader.active = true
+            }
+        }
+        onRunningChanged: {
+            if (running) {
+                cancelReconnectButton.forceActiveFocus()
+            }
+        }
     }
 
     Timer {
@@ -250,7 +298,9 @@ Item {
     }
 
     Row {
+        id: statusRow
         anchors.centerIn: parent
+        width: Math.min(680, Math.max(1, parent.width - 48))
         spacing: 5
 
         BusyIndicator {
@@ -261,7 +311,8 @@ Item {
 
         Label {
             id: stageLabel
-            height: stageSpinner.height
+            width: Math.max(1, parent.width - stageSpinner.width - parent.spacing)
+            height: Math.max(implicitHeight, stageSpinner.height)
             text: stageText
             font.pointSize: 20
             verticalAlignment: Text.AlignVCenter
@@ -270,8 +321,20 @@ Item {
         }
     }
 
+    Button {
+        id: cancelReconnectButton
+        anchors.top: statusRow.bottom
+        anchors.topMargin: 24
+        anchors.horizontalCenter: parent.horizontalCenter
+        visible: streamSegue.canCancelReconnect
+        text: qsTr("Cancel reconnect")
+        Accessible.description: qsTr("Stop retrying and return to your hosts. You can reconnect manually later.")
+        onClicked: streamSegue.cancelReconnect()
+    }
+
     Label {
         id: hintText
+        width: Math.max(1, parent.width - 48)
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 50
         anchors.horizontalCenter: parent.horizontalCenter
@@ -279,5 +342,48 @@ Item {
         verticalAlignment: Text.AlignVCenter
 
         wrapMode: Text.Wrap
+    }
+
+    NavigableDialog {
+        id: twoFactorDialog
+        title: qsTr("Two-factor code")
+        property string message
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+
+        onOpened: {
+            codeField.text = ""
+            codeField.forceActiveFocus()
+        }
+        onAccepted: {
+            if (session) {
+                session.submitTwoFactorCode(codeField.text)
+            }
+        }
+        onRejected: {
+            if (session) {
+                session.cancelTwoFactor()
+            }
+        }
+
+        Column {
+            spacing: 12
+            width: 380
+
+            Label {
+                text: twoFactorDialog.message
+                wrapMode: Text.Wrap
+                width: parent.width
+            }
+
+            TextField {
+                id: codeField
+                width: parent.width
+                maximumLength: 12
+                inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                placeholderText: qsTr("123456")
+                onAccepted: twoFactorDialog.accept()
+            }
+        }
     }
 }

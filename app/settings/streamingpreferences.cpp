@@ -1,5 +1,7 @@
 #include "streamingpreferences.h"
 #include "utils.h"
+#include "hostprofilestore.h"
+#include <QMetaProperty>
 
 #include <QSettings>
 #include <QTranslator>
@@ -107,6 +109,8 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 void StreamingPreferences::reload()
 {
     QSettings settings;
+    m_SessionBitratePolicy.locked = settings.value("vibelight/bitrateLocked", false).toBool();
+    m_SessionBitratePolicy.requested = settings.value("vibelight/autoBitrate", false).toBool();
 
     int defaultVer = settings.value(SER_DEFAULTVER, 0).toInt();
 
@@ -323,8 +327,49 @@ QString StreamingPreferences::getSuffixFromLanguage(StreamingPreferences::Langua
     }
 }
 
+StreamingPreferences* StreamingPreferences::cloneForSession() const
+{
+    auto snapshot = new StreamingPreferences(nullptr);
+    const auto meta = metaObject();
+    for (int i = meta->propertyOffset(); i < meta->propertyCount(); ++i) {
+        const auto property = meta->property(i);
+        if (property.isReadable() && property.isWritable()) {
+            property.write(snapshot, property.read(this));
+        }
+    }
+    // These are the only non-Q_PROPERTY preference values.
+    snapshot->packetSize = packetSize;
+    snapshot->recommendedFullScreenMode = recommendedFullScreenMode;
+    snapshot->m_SessionBitratePolicy = m_SessionBitratePolicy;
+    snapshot->m_SessionBitratePolicy.locked = m_IsSessionSnapshot ? m_SessionBitratePolicy.locked :
+        QSettings().value("vibelight/bitrateLocked", false).toBool();
+    snapshot->m_IsSessionSnapshot = true;
+    return snapshot;
+}
+
+StreamingPreferences* StreamingPreferences::forHost(const QString& uuid) const
+{
+    auto snapshot = cloneForSession();
+    QSettings settings;
+    const auto stored = vibelight::readHostProfile(settings, uuid);
+    snapshot->m_SessionBitratePolicy = vibelight::resolveBitratePolicy(
+        settings.value("vibelight/autoBitrate", false).toBool(),
+        snapshot->m_SessionBitratePolicy.locked,
+        settings.value("vibelight/hostBitrateLock/" + uuid.toUtf8().toHex(), false).toBool(),
+        stored.valid, stored.profile.adaptiveBitrate);
+    if (stored.valid) {
+        snapshot->width = stored.profile.width;
+        snapshot->height = stored.profile.height;
+        snapshot->fps = stored.profile.fps;
+        snapshot->bitrateKbps = stored.profile.bitrateKbps;
+        snapshot->autoAdjustBitrate = false; // A profile bitrate is an explicit ceiling.
+    }
+    return snapshot;
+}
+
 void StreamingPreferences::save()
 {
+    if (m_IsSessionSnapshot) return; // Session fallbacks must never overwrite global defaults.
     QSettings settings;
 
     settings.setValue(SER_WIDTH, width);

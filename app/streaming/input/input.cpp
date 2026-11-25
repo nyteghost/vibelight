@@ -2,6 +2,7 @@
 #include "SDL_compat.h"
 #include "streaming/session.h"
 #include "settings/mappingmanager.h"
+#include "settings/mousecapturestore.h"
 #include "path.h"
 #include "utils.h"
 
@@ -31,7 +32,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_LongPressTimer(0),
       m_StreamWidth(streamWidth),
       m_StreamHeight(streamHeight),
-      m_AbsoluteMouseMode(prefs.absoluteMouseMode),
+      m_MouseCapturePolicy(prefs.absoluteMouseMode, false),
       m_AbsoluteTouchMode(prefs.absoluteTouchMode),
       m_DisabledTouchFeedback(false),
       m_LeftButtonReleaseTimer(0),
@@ -40,6 +41,9 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_DragButton(0),
       m_NumFingersDown(0)
 {
+    QSettings mouseSettings;
+    m_MouseCapturePolicy.setKeepUnlocked(WMUtils::isRunningDesktopEnvironment() &&
+                                         vibelight::readKeepMouseUnlocked(mouseSettings));
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -111,8 +115,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboToggleMouseMode].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCombo = KeyComboToggleCursorHide;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_c;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].scanCode = SDL_SCANCODE_C;
+    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_u;
+    m_SpecialKeyCombos[KeyComboToggleCursorHide].scanCode = SDL_SCANCODE_U;
     m_SpecialKeyCombos[KeyComboToggleCursorHide].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
@@ -139,6 +143,13 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = WMUtils::isRunningDesktopEnvironment();
+
+    // Ctrl+Alt+Shift+C copies the host's clipboard to this PC (Vibebeam hosts only). The
+    // upstream "show/hide cursor" combo that used to be on C moved to U.
+    m_SpecialKeyCombos[KeyComboPullClipboard].keyCombo = KeyComboPullClipboard;
+    m_SpecialKeyCombos[KeyComboPullClipboard].keyCode = SDLK_c;
+    m_SpecialKeyCombos[KeyComboPullClipboard].scanCode = SDL_SCANCODE_C;
+    m_SpecialKeyCombos[KeyComboPullClipboard].enabled = true;
 
     // The last key of the shortcuts menu hotkey can be changed in Settings (H by default)
     const int menuLetterIndex = vibelight::sanitizeMenuHotkey(
@@ -293,7 +304,7 @@ void SdlInputHandler::notifyFocusLost()
     // This lets user to interact with our window's title bar and with the buttons in it.
     // Doing this while the window is full-screen breaks the transition out of FS
     // (desktop and exclusive), so we must check for that before releasing mouse capture.
-    if (!(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) && !m_AbsoluteMouseMode) {
+    if (!(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) && !isAbsoluteMouseMode()) {
         setCaptureActive(false);
     }
 
@@ -370,15 +381,20 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
+        if (keepsMouseUnlocked()) {
+            // Click-to-resume, menu dismissal and window recreation must never
+            // re-enable relative capture while the persistent override is on.
+            SDL_SetRelativeMouseMode(SDL_FALSE);
+        }
         // If we're in relative mode, try to activate SDL's relative mouse mode
-        if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
+        if (isAbsoluteMouseMode() || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
             // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
             SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
             m_FakeMouseCaptureActive = true;
         }
 
         // Synchronize the client and host cursor when activating absolute capture
-        if (m_AbsoluteMouseMode) {
+        if (isAbsoluteMouseMode()) {
             int mouseX, mouseY;
             int windowX, windowY;
 
@@ -419,6 +435,19 @@ void SdlInputHandler::setCaptureActive(bool active)
 
     // Now update the keyboard grab
     updateKeyboardGrabState();
+}
+
+void SdlInputHandler::setKeepMouseUnlocked(bool enabled)
+{
+    const bool wasActive = isCaptureActive() || m_CtrlAltMouseReleased;
+    m_CtrlAltMouseReleased = false;
+    m_ReleaseKeyHeld = false;
+    raiseAllKeys();
+    setCaptureActive(false);
+    m_MouseCapturePolicy.setKeepUnlocked(enabled);
+    QSettings settings;
+    vibelight::saveKeepMouseUnlocked(settings, enabled);
+    setCaptureActive(wasActive);
 }
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)

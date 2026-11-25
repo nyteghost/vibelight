@@ -2,6 +2,7 @@
 #include "streaming/session.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 
 class ComputerModel : public QAbstractListModel
 {
@@ -16,7 +17,8 @@ class ComputerModel : public QAbstractListModel
         WakeableRole,
         StatusUnknownRole,
         ServerSupportedRole,
-        DetailsRole
+        DetailsRole,
+        ProfileSummaryRole
     };
 
 public:
@@ -45,9 +47,22 @@ public:
 
     Q_INVOKABLE Session* createSessionForCurrentGame(int computerIndex);
 
+    // Monitor picker (Vibebeam hosts): asks the host which monitors it offers, then emits
+    // monitorsReady. The choice is remembered per PC; an empty id means the host's own choice.
+    Q_INVOKABLE bool supportsHostTwoFactorPreflight(int computerIndex) const;
+    Q_INVOKABLE void checkTwoFactorForComputer(int computerIndex, QString code);
+    Q_INVOKABLE void cancelTwoFactorForComputer(int computerIndex);
+
+    Q_INVOKABLE void chooseMonitorForComputer(int computerIndex);
+    Q_INVOKABLE void setMonitorForComputer(int computerIndex, QString monitorId);
+    Q_INVOKABLE QVariantMap profileForComputer(int computerIndex) const;
+    Q_INVOKABLE QString saveProfileForComputer(QString uuid, QVariantMap values, bool enabled);
+
 signals:
     void pairingCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
+    void monitorsReady(int computerIndex, QStringList ids, QStringList names, QString current, QString error);
+    void twoFactorCheckCompleted(int computerIndex, int status, QString error);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);
@@ -56,5 +71,7 @@ private slots:
 
 private:
     QVector<NvComputer*> m_Computers;
+    QHash<QString, quint64> m_MonitorRequestGenerations;
+    QHash<QString, quint64> m_TwoFactorRequestGenerations;
     ComputerManager* m_ComputerManager;
 };

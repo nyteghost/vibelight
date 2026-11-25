@@ -39,6 +39,10 @@ typedef struct _CONNECTION_SNAPSHOT {
     uint32_t networkDroppedFrames;
     double videoMbps;     // recent average video bitrate actually received
     uint32_t rttMs;       // 0 if unknown
+    uint32_t rttVarianceMs;
+    uint32_t decodedFrames;
+    uint32_t pacerDroppedFrames;
+    uint64_t totalDecodeTimeUs;
 } CONNECTION_SNAPSHOT, *PCONNECTION_SNAPSHOT;
 
 typedef struct _DECODER_PARAMETERS {

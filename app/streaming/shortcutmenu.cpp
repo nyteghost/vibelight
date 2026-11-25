@@ -1,4 +1,8 @@
+#include "networktestrequest.h"
+#include "networkbitratecheck.h"
 #include "shortcutmenu.h"
+#include "streamcheckmetrics.h"
+#include <QFileInfo>
 #include "streaming/input/input.h"
 #include "path.h"
 
@@ -15,6 +19,8 @@
 #include <QStringList>
 #include <QUrl>
 #include <QSettings>
+#include <QThread>
+#include <QUuid>
 
 #include <Limelight.h>
 
@@ -26,6 +32,8 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <utility>
 
 #ifdef Q_OS_WIN32
 #ifndef NOMINMAX
@@ -105,6 +113,15 @@ bool pointInRect(const SDL_Rect& r, int x, int y)
 }
 
 } // namespace
+
+#ifdef Q_OS_WIN32
+struct ScreenshotSaveState {
+    std::mutex mutex;
+    bool finished = false;
+    std::string notification;
+    QString savedPath;
+};
+#endif
 
 bool ShortcutMenu::isSupportedOnThisPlatform()
 {
@@ -221,6 +238,11 @@ ShortcutMenu::~ShortcutMenu()
     endDrag();
     destroyGraphWindow();
     overrideMinimizeOnFocusLoss(false);
+
+    for (auto& entry : m_TextCache) {
+        SDL_FreeSurface(entry.second);
+    }
+    m_TextCache.clear();
 
     if (m_Window != nullptr) {
         SDL_DestroyWindow(m_Window);
@@ -396,7 +418,7 @@ void ShortcutMenu::buildItems()
         item.rect = {0, 0, 0, 0};
         m_Items.push_back(item);
     };
-    auto special = [this](int page, const char* label, const std::string& hint, Kind kind) {
+    auto special = [this](int page, const std::string& label, const std::string& hint, Kind kind) {
         Item item;
         item.label = label;
         item.hint = hint;
@@ -428,7 +450,8 @@ void ShortcutMenu::buildItems()
     client(PageVibelight, "Toggle fullscreen",        "X", SdlInputHandler::KeyComboToggleFullScreen, false);
     client(PageVibelight, "Performance stats",        "S", SdlInputHandler::KeyComboToggleStatsOverlay, false);
     client(PageVibelight, "Mouse mode",               "M", SdlInputHandler::KeyComboToggleMouseMode, false);
-    client(PageVibelight, "Show/hide cursor",         "C", SdlInputHandler::KeyComboToggleCursorHide, false);
+    client(PageVibelight, "Show/hide cursor",         "U", SdlInputHandler::KeyComboToggleCursorHide, false);
+    client(PageVibelight, "Get host clipboard",       "C", SdlInputHandler::KeyComboPullClipboard, false);
     client(PageVibelight, "Minimize",                 "D", SdlInputHandler::KeyComboToggleMinimize, false);
     client(PageVibelight, "Paste clipboard as typing","V", SdlInputHandler::KeyComboPasteText, false);
     // Typing mode opens its own small page with the two choices
@@ -438,7 +461,30 @@ void ShortcutMenu::buildItems()
     client(PageVibelight, "System key capture",       "K", SdlInputHandler::KeyComboToggleKeyboardGrab, false);
 
     // Tools & session
-    special(PageTools, "Check connection", "10 s, suggests bitrate", KindConnectionCheck);
+    special(PageTools, "Test network for bitrate", "20 s of moving gameplay", KindNetworkCheck);
+    if (!m_NetworkResult.empty()) special(PageTools, m_NetworkResult, "sample-based advice, not maximum speed", KindInfo);
+    if (m_NetworkRecommendation > 0 && !m_CheckActive) {
+        special(PageTools, "Apply and lock " + std::to_string(m_NetworkRecommendation / 1000.0).substr(0, 5) + " Mbps for this PC", "saved for next connection", KindApplyNetworkLock);
+    }
+    if (Session::get() && Session::get()->hasHostBitrateLock())
+        special(PageTools, "Unlock this PC's bitrate", "next connection; global lock still applies", KindUnlockHostBitrate);
+    special(PageTools, "Run streaming check", "10 s, observe and export ZIP", KindConnectionCheck);
+    special(PageTools, "Cancel streaming check", "stop sampling", KindCheckCancel);
+    special(PageTools, m_CheckScope == 1 ? "Network: remote" : m_CheckScope == 2 ? "Network: home LAN" : "Network: unspecified", "click to change test context", KindCheckScope);
+    special(PageTools, "Open diagnostic reports", "Downloads / Vibelight / Diagnostics", KindCheckOpen);
+    special(PageTools, "Copy troubleshooting prompt", "paste with the exported ZIP", KindCheckCopy);
+    special(PageTools, "Preview bitrate notification", "test notification position", KindPreviewBitrate);
+    special(PageTools, "Test 30-minute idle prompt", "disconnects if unanswered", KindPreviewIdlePrompt);
+    special(PageTools, "Download newest host file", "Downloads/Vibelight", KindDownloadHostFile);
+    special(PageTools, "Browse host files", "choose a shared file", KindBrowseHostFiles);
+    const QString transferStatus = Session::get() ? Session::get()->transferProgressText() : QString();
+    if (!transferStatus.isEmpty()) {
+        special(PageTools, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
+    if (!Session::isSecondaryWindow()) {
+        special(PageTools, "Open second monitor window", "Remote Monitor", KindSecondWindow);
+    }
 #ifdef Q_OS_WIN32
     special(PageTools, "Screenshot of stream", "saves a PNG", KindScreenshot);
     special(PageTools, "Latency graph", m_GraphEnabled ? "on" : "off", KindToggleGraph);
@@ -452,6 +498,48 @@ void ShortcutMenu::buildItems()
     m_Items.back().target = 0;
     special(PageTyping, "Key presses", "terminals, Linux hosts", KindSetTyping);
     m_Items.back().target = 1;
+
+    // The share browser is intentionally bounded: eight items per page
+    // prevents the floating menu from extending beyond small stream windows.
+    m_PageTitles[PageHostFiles].push_back("Host shared files (Downloads/Vibelight)");
+    special(PageHostFiles, "Refresh host file list", "recheck the host", KindRefreshHostFiles);
+    if (m_HostFilesLoading || !m_HostFileError.isEmpty() || m_HostFiles.isEmpty()) {
+        Item info;
+        info.kind = KindInfo;
+        info.label = m_HostFilesLoading ? "Loading host files..." :
+                     !m_HostFileError.isEmpty() ? m_HostFileError.left(70).toStdString() :
+                     "No host files found";
+        info.page = PageHostFiles;
+        info.column = 0;
+        info.clientCombo = -1;
+        info.dangerous = false;
+        m_Items.push_back(info);
+    }
+    else {
+        const int pageSize = 8;
+        const int start = m_HostFilesPage * pageSize;
+        for (int n = start; n < qMin(m_HostFiles.size(), start + pageSize); ++n) {
+            Item file;
+            const QString name = m_HostFiles.at(n);
+            file.kind = KindHostFileItem;
+            file.label = name.size() > 49 ? (name.left(46) + "...").toStdString() : name.toStdString();
+            file.hint = "download";
+            file.text = name.toStdString();
+            file.page = PageHostFiles;
+            file.column = 0;
+            file.clientCombo = -1;
+            file.dangerous = false;
+            m_Items.push_back(file);
+        }
+        if (m_HostFilesPage > 0)
+            special(PageHostFiles, "Previous files", "previous 8", KindHostFilesPrevious);
+        if ((m_HostFilesPage + 1) * pageSize < m_HostFiles.size())
+            special(PageHostFiles, "More files", "next 8", KindHostFilesNext);
+    }
+    if (!transferStatus.isEmpty()) {
+        special(PageHostFiles, "Cancel active file transfers",
+                transferStatus.left(46).toStdString(), KindCancelTransfer);
+    }
 
     // Displays & windows: display and multi-monitor shortcuts sent to the remote PC
     // (0x50 = P, 0x25 = Left arrow, 0x27 = Right arrow, 0x42 = B)
@@ -813,6 +901,18 @@ void ShortcutMenu::addCategoryRows(bool hasTopColumn)
 
     m_PageTitles[PageRoot].push_back("Menu");
 
+    // Always visible on the root page, even with no pinned shortcuts.
+    Item mouseMode;
+    mouseMode.label = "Keep mouse unlocked between screens";
+    mouseMode.hint = m_Input->keepsMouseUnlocked() ? "On" : "Off";
+    mouseMode.kind = KindKeepMouseUnlocked;
+    mouseMode.clientCombo = -1;
+    mouseMode.dangerous = false;
+    mouseMode.column = hasTopColumn ? 1 : 0;
+    mouseMode.page = PageRoot;
+    mouseMode.rect = {0, 0, 0, 0};
+    m_Items.push_back(mouseMode);
+
     for (const Category& category : categories) {
         const int count = itemsOnPage(category.page);
         if (count == 0) {
@@ -835,7 +935,8 @@ void ShortcutMenu::addCategoryRows(bool hasTopColumn)
 
 int ShortcutMenu::parentPage(int page)
 {
-    return page == PageTyping ? PageVibelight : PageRoot;
+    return page == PageTyping ? PageVibelight :
+           page == PageHostFiles ? PageTools : PageRoot;
 }
 
 bool ShortcutMenu::currentTypeAsKeys() const
@@ -909,7 +1010,7 @@ void ShortcutMenu::recordRecent(const Item& item)
     settings.setValue("vibelight/recentShortcuts", recents);
 }
 
-void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs)
+void ShortcutMenu::showTransient(const std::string& message, unsigned int durationMs, TransientPlacement placement)
 {
     if (m_Window == nullptr || m_Expanded) {
         // Never disturb an open menu
@@ -920,6 +1021,7 @@ void ShortcutMenu::showTransient(const std::string& message, unsigned int durati
         m_TransientOwnsReveal = !m_Revealed;
     }
     m_TransientMessage = message;
+    m_TransientPlacement = placement;
     m_TransientUntil = SDL_GetTicks() + durationMs;
     if (m_TransientUntil == 0) {
         m_TransientUntil = 1;
@@ -944,6 +1046,7 @@ void ShortcutMenu::endTransient()
     m_TransientUntil = 0;
     m_TransientOwnsReveal = false;
     m_TransientMessage.clear();
+    m_TransientPlacement = TransientPlacement::AtButton;
 
     if (m_Window == nullptr) {
         return;
@@ -962,7 +1065,67 @@ void ShortcutMenu::endTransient()
 
 void ShortcutMenu::tick()
 {
+    // Allow the decoder to settle before starting a dashboard-requested sample.
+    // Secondary windows must not consume the primary stream's request.
+    if (!m_DashboardNetworkRequestChecked && !Session::isSecondaryWindow() &&
+        SDL_GetTicks() - m_StartTicks >= 5000) {
+        m_DashboardNetworkRequestChecked = true;
+        if (vibelight::takeNetworkTest()) startConnectionCheck(true);
+    }
+
     pollClipboard();
+
+    if (Session* session = Session::get()) {
+        QStringList hostFiles;
+        QString hostError;
+        if (session->takeHostFileList(hostFiles, hostError)) {
+            m_HostFiles = hostFiles;
+            m_HostFileError = hostError;
+            m_HostFilesLoading = false;
+            m_HostFilesPage = 0;
+            if (m_Expanded && m_Page == PageHostFiles) {
+                rebuildItems();
+                goToPage(PageHostFiles);
+            }
+        }
+        // Redraw at most once per second while displaying live transfer progress.
+        const unsigned int now = SDL_GetTicks();
+        if (m_Expanded && (m_Page == PageTools || m_Page == PageHostFiles) &&
+            static_cast<int>(now - m_NextTransferRefresh) >= 0) {
+            m_NextTransferRefresh = now + 1000;
+            const QString status = session->transferProgressText();
+            if (status.toStdString() != m_LastTransferProgress) {
+                m_LastTransferProgress = status.toStdString();
+                const int page = m_Page;
+                rebuildItems();
+                goToPage(page);
+            }
+        }
+    }
+
+#ifdef Q_OS_WIN32
+    if (m_ScreenshotSaveState) {
+        bool finished = false;
+        std::string message;
+        QString savedPath;
+        {
+            std::lock_guard<std::mutex> lock(m_ScreenshotSaveState->mutex);
+            finished = m_ScreenshotSaveState->finished;
+            if (finished) {
+                message = m_ScreenshotSaveState->notification;
+                savedPath = m_ScreenshotSaveState->savedPath;
+            }
+        }
+        if (finished) {
+            m_ScreenshotSaveState.reset();
+            if (!savedPath.isEmpty()) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s",
+                            savedPath.toUtf8().constData());
+            }
+            showTransient(message, savedPath.isEmpty() ? 3000 : 2500);
+        }
+    }
+#endif
 
     if (m_ScreenshotAt != 0 && (int)(SDL_GetTicks() - m_ScreenshotAt) >= 0) {
         m_ScreenshotAt = 0;
@@ -975,6 +1138,18 @@ void ShortcutMenu::tick()
             updateGraphWindow();
         }
         sampleGraph();
+    }
+
+    if (m_CheckExport) {
+        bool done;
+        QString path;
+        { QMutexLocker locker(&m_CheckExport->lock); done = m_CheckExport->done; path = m_CheckExport->path; }
+        if (done) {
+            m_CheckExport.reset();
+            m_CheckReportPath = path;
+            showTransient(path.isEmpty() ? "Couldn't save streaming report. Check Downloads permissions and disk space" :
+                          "Report saved. Tools > Open diagnostic reports; Copy troubleshooting prompt", 12000);
+        }
     }
 
     if (m_CheckActive && (int)(SDL_GetTicks() - m_CheckEndsAt) >= 0) {
@@ -1012,64 +1187,91 @@ std::string ShortcutMenu::elapsedString() const
     return buf;
 }
 
-void ShortcutMenu::startConnectionCheck()
+void ShortcutMenu::startConnectionCheck(bool networkTest)
 {
-    Session* session = Session::get();
-    CONNECTION_SNAPSHOT snapshot = {};
-    if (session == nullptr || !session->getConnectionSnapshot(snapshot)) {
-        showTransient("Connection check isn't available for this stream", 4000);
+    if (m_CheckActive || m_CheckExport) {
+        showTransient("A streaming check is already running", 4000);
         return;
     }
-
+    Session* session = Session::get();
+    if (!session) return;
+    CONNECTION_SNAPSHOT snapshot = {};
+    m_CheckContext = session->streamCheckContext();
+    if (networkTest && (m_CheckContext.value("adaptive_bitrate_requested").toBool() || Session::isSecondaryWindow())) {
+        showTransient("For a stable test, turn off automatic bitrate (including host profile), reconnect, and use the primary window", 12000);
+        return;
+    }
+    m_NetworkTest = networkTest;
+    m_NetworkRecommendation = 0;
+    m_NetworkResult.clear();
+    m_CheckContext["network_scope"] = m_CheckScope == 1 ? "remote_user_selected" : m_CheckScope == 2 ? "home_lan_user_selected" : "unspecified";
+    m_CheckHaveStart = session->getConnectionSnapshot(snapshot);
     m_CheckStartFrames = snapshot.totalFrames;
     m_CheckStartDropped = snapshot.networkDroppedFrames;
-    m_CheckEndsAt = SDL_GetTicks() + 10000;
+    m_CheckStartDecoded = snapshot.decodedFrames;
+    m_CheckStartPacerDropped = snapshot.pacerDroppedFrames;
+    m_CheckStartDecodeUs = snapshot.totalDecodeTimeUs;
+    m_CheckStartedAt = SDL_GetTicks();
+    m_CheckEndsAt = m_CheckStartedAt + (networkTest ? 20000 : 10000);
     m_CheckActive = true;
-    showTransient("Checking connection for 10 s...", 12000);
+    rebuildItems();
+    showTransient(networkTest ? "Network check: play moving gameplay for 20 s. Settings stay unchanged; Tools > Cancel to stop" : "Observing stream for 10 s; settings stay unchanged. Tools > Cancel to stop", networkTest ? 22000 : 12000);
 }
 
 void ShortcutMenu::finishConnectionCheck()
 {
     m_CheckActive = false;
-
     Session* session = Session::get();
+    if (!session) return;
     CONNECTION_SNAPSHOT snapshot = {};
-    if (session == nullptr || !session->getConnectionSnapshot(snapshot)) {
-        showTransient("Connection check failed", 4000);
-        return;
+    const bool available = m_CheckHaveStart && session->getConnectionSnapshot(snapshot);
+    const auto elapsed = static_cast<unsigned int>(SDL_GetTicks() - m_CheckStartedAt);
+    const auto metrics = vibelight::checkMetrics(
+        {m_CheckStartFrames, m_CheckStartDropped, m_CheckStartDecoded, m_CheckStartPacerDropped, m_CheckStartDecodeUs},
+        {snapshot.totalFrames, snapshot.networkDroppedFrames, snapshot.decodedFrames, snapshot.pacerDroppedFrames, snapshot.totalDecodeTimeUs}, elapsed);
+    const bool valid = available && metrics.countersValid;
+    QJsonObject report{{"schema", 1}, {"kind", "passive_streaming_check"},
+        {"created_utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+        {"elapsed_ms", static_cast<double>(elapsed)}, {"stream_at_start", m_CheckContext},
+        {"stream_at_end", session->streamCheckContext()},
+        {"collection_status", valid && metrics.sufficientVideo ? "passed" : "inconclusive"},
+        {"controller_to_screen_latency", QJsonValue()}, {"packet_loss_percent", QJsonValue()},
+        {"network_jitter_ms", QJsonValue()}, {"host_applied_bitrate_kbps", QJsonValue()},
+        {"actual_encoder_implementation", QJsonValue()}};
+    QJsonObject measured;
+    if (valid) {
+        measured["incoming_frame_rate_including_missing_frames"] = metrics.observedFps;
+        measured["network_dropped_frame_percent"] = metrics.networkDropPercent;
+        if (metrics.decodeAvailable) {
+            measured["mean_decode_ms"] = metrics.decodeMs;
+            measured["pacer_dropped_frame_percent"] = metrics.pacerDropPercent;
+        }
+        if (snapshot.rttMs > 0) {
+            measured["latest_rtt_ms"] = static_cast<double>(snapshot.rttMs);
+            measured["latest_rtt_variance_ms"] = static_cast<double>(snapshot.rttVarianceMs);
+        }
+        if (std::isfinite(snapshot.videoMbps) && snapshot.videoMbps > 0) measured["recent_received_video_mbps"] = snapshot.videoMbps;
     }
-
-    unsigned int frames = snapshot.totalFrames - m_CheckStartFrames;
-    unsigned int dropped = snapshot.networkDroppedFrames - m_CheckStartDropped;
-    if (frames < 120) {
-        // The stream was paused, minimized or too idle for a meaningful result
-        showTransient("Not enough video to judge. Try again while something is moving", 6000);
-        return;
+    report["measured"] = measured;
+    if (m_NetworkTest) {
+        const auto end = session->streamCheckContext();
+        auto start = m_CheckContext;
+        start.remove("network_scope");
+        const auto advice = vibelight::networkBitrateAdvice(metrics, elapsed,
+            m_CheckContext.value("client_configured_bitrate_kbps").toInt(),
+            m_CheckContext.value("fps").toInt(), valid && end == start);
+        m_NetworkRecommendation = advice.kbps;
+        m_NetworkResult = advice.reason;
+        report["network_bitrate_advice"] = QJsonObject{{"recommended_target_kbps", advice.kbps > 0 ? QJsonValue(advice.kbps) : QJsonValue()},
+            {"reason", advice.reason}, {"method", "passive_stream_sample_not_bandwidth_speedtest"}, {"applied", false}};
+        rebuildItems();
     }
-
-    double dropPercent = 100.0 * dropped / frames;
-    double currentMbps = session->getConfiguredBitrateKbps() / 1000.0;
-    const double suggestedMbps = vibelight::suggestBitrateMbps(currentMbps, dropPercent, snapshot.rttMs, snapshot.videoMbps);
-
-    char buf[160];
-    if (dropPercent >= 1.0) {
-        SDL_snprintf(buf, sizeof(buf), "Dropping %.1f%% of frames. Try %d Mbps (now %d)",
-                     dropPercent, (int)suggestedMbps, (int)(currentMbps + 0.5));
-    }
-    else if (suggestedMbps > currentMbps + 0.5) {
-        SDL_snprintf(buf, sizeof(buf), "Connection is clean (%.1f%% dropped). Could try %d Mbps (now %d)",
-                     dropPercent, (int)suggestedMbps, (int)(currentMbps + 0.5));
-    }
-    else {
-        SDL_snprintf(buf, sizeof(buf), "Connection OK (%.1f%% dropped). %d Mbps is a good fit",
-                     dropPercent, (int)(currentMbps + 0.5));
-    }
-
-    // Remember the suggestion so the Settings page can offer it
-    QSettings settings;
-    settings.setValue("vibelight/suggestedBitrateKbps", (int)suggestedMbps * 1000);
-
-    showTransient(buf, 10000);
+    report["manual_checks"] = QJsonObject{{"cursor_visibility_and_alignment", "needs_confirmation"},
+        {"audio_audibility_and_sync", "needs_confirmation"}, {"display_restoration_after_disconnect", "needs_confirmation"},
+        {"original_audio_output_after_disconnect", "needs_confirmation"}};
+    report["limitations"] = "Collection passed means usable samples, not certified stream quality. Counters are published about once per second. RTT is a latest estimate; variance is not packet jitter. Missing metrics are unknown. Host capture observations may be shared by multiple sessions. No performance benchmark or physical cleanup verdict is inferred.";
+    m_CheckExport = session->exportStreamingCheck(report);
+    showTransient("Sampling complete; collecting host observations and saving redacted ZIP...", 8000);
 }
 
 void ShortcutMenu::showHint()
@@ -1244,7 +1446,18 @@ void ShortcutMenu::updatePosition()
     SDL_GetWindowSize(m_Window, &w, &h);
 
     int x, y;
-    if (m_HasCustomPosition) {
+    const bool anchoredTransient = m_TransientUntil != 0 && !m_Expanded &&
+                                   m_TransientPlacement != TransientPlacement::AtButton;
+    if (anchoredTransient && m_TransientPlacement == TransientPlacement::BottomRight) {
+        // Bitrate notices follow the stream window, not a dragged shortcuts button.
+        x = px + pw - w - 12;
+        y = py + ph - h - 12;
+    }
+    else if (anchoredTransient) {
+        x = px + (pw - w) / 2;
+        y = py + kDefaultTopMargin;
+    }
+    else if (m_HasCustomPosition) {
         x = px + m_OffsetX;
         y = py + m_OffsetY;
     }
@@ -1253,10 +1466,9 @@ void ShortcutMenu::updatePosition()
         y = py + kDefaultTopMargin;
     }
 
-    // Keep the whole menu inside the stream window so it can't get lost off-screen
-    // when the stream window is resized or moved to another display.
-    x = qMax(px, qMin(x, px + pw - w));
-    y = qMax(py, qMin(y, py + ph - h));
+    // Never shift the left/top edge out of view on small stream windows.
+    x = qMax(px, qMin(x, px + qMax(0, pw - w)));
+    y = qMax(py, qMin(y, py + qMax(0, ph - h)));
 
     int cx, cy;
     SDL_GetWindowPosition(m_Window, &cx, &cy);
@@ -1462,6 +1674,17 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindKeepMouseUnlocked) {
+        // Change policy before dismissal restores input, so it cannot briefly
+        // recapture the cursor in relative mode when enabling this option.
+        const bool enabled = !m_Input->keepsMouseUnlocked();
+        m_Input->setKeepMouseUnlocked(enabled);
+        dismiss(true);
+        showTransient(enabled ? "Mouse stays unlocked between screens (saved)"
+                              : "Normal mouse mode restored (saved)", 4000);
+        return;
+    }
+
     if (item.kind == KindOpenConfig) {
         // Hide the button, then open the file in whatever editor the OS prefers
         dismiss(false);
@@ -1469,12 +1692,108 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindBrowseHostFiles || item.kind == KindRefreshHostFiles) {
+        if (Session* session = Session::get()) {
+            m_HostFiles.clear();
+            m_HostFileError.clear();
+            m_HostFilesLoading = true;
+            m_HostFilesPage = 0;
+            session->requestHostFileList();
+            m_Page = PageHostFiles;
+            rebuildItems();
+            goToPage(PageHostFiles);
+        }
+        return;
+    }
+    if (item.kind == KindHostFilesNext || item.kind == KindHostFilesPrevious) {
+        m_HostFilesPage += item.kind == KindHostFilesNext ? 1 : -1;
+        m_HostFilesPage = qBound(0, m_HostFilesPage, qMax(0, (m_HostFiles.size() - 1) / 8));
+        rebuildItems();
+        goToPage(PageHostFiles);
+        return;
+    }
+
     // Hide the button and give focus (and mouse capture, if we took it) back before
     // acting so that the action sees the same state the user had.
     dismiss(true);
+    if (item.kind == KindHostFileItem) {
+        if (Session::get()) Session::get()->startDownloadHostFile(QString::fromStdString(item.text));
+        return;
+    }
+    if (item.kind == KindCancelTransfer) {
+        if (Session::get()) Session::get()->cancelFileTransfers();
+        return;
+    }
 
+    if (item.kind == KindCheckCancel) {
+        m_CheckActive = false;
+        showTransient(m_CheckExport ? "Report export is already finishing (host timeout: 5 s)" : "Streaming check sampling canceled", 4000);
+        return;
+    }
+    if (item.kind == KindCheckScope) {
+        if (m_CheckActive || m_CheckExport) { showTransient("Finish or cancel the current check first", 4000); return; }
+        m_CheckScope = (m_CheckScope + 1) % 3;
+        rebuildItems();
+        showTransient(m_CheckScope == 1 ? "Test context: remote (work to home)" : m_CheckScope == 2 ? "Test context: home LAN" : "Test context: unspecified", 4000);
+        return;
+    }
+    if (item.kind == KindCheckCopy) {
+        const auto text = vibelight::checkPrompt().toUtf8();
+        showTransient(SDL_SetClipboardText(text.constData()) == 0 ? "Troubleshooting prompt copied. Attach the redacted ZIP" : "Couldn't copy prompt", 5000);
+        return;
+    }
+    if (item.kind == KindCheckOpen) {
+        const auto folder = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation) + "/Vibelight/Diagnostics";
+        showTransient(QDir(folder).exists() && QDesktopServices::openUrl(QUrl::fromLocalFile(folder)) ? "Opened diagnostic reports" : "No saved report folder yet. Run a streaming check first", 5000);
+        return;
+    }
+
+    if (item.kind == KindNetworkCheck) {
+        startConnectionCheck(true);
+        return;
+    }
+    if (item.kind == KindApplyNetworkLock || item.kind == KindUnlockHostBitrate) {
+        const int kbps = item.kind == KindUnlockHostBitrate ? 0 : m_NetworkRecommendation;
+        const bool ok = Session::get() && !m_CheckActive &&
+            (item.kind == KindUnlockHostBitrate || kbps > 0) && Session::get()->saveNetworkBitrateLock(kbps);
+        if (ok) m_NetworkRecommendation = 0;
+        rebuildItems();
+        showTransient(ok ? "Saved for next connection. Global bitrate lock, if enabled, still applies" : "Could not save bitrate choice; settings were not confirmed", 9000);
+        return;
+    }
     if (item.kind == KindConnectionCheck) {
         startConnectionCheck();
+        return;
+    }
+
+    if (item.kind == KindPreviewBitrate) {
+        const int position = QSettings().value("vibelight/autoBitrateNotificationPosition", 0).toInt();
+        showTransient("Bitrate notification preview (position test)", 4500,
+                      position == 1 ? TransientPlacement::BottomRight : TransientPlacement::TopCenter);
+        return;
+    }
+
+    if (item.kind == KindPreviewIdlePrompt) {
+        if (Session::get() != nullptr) Session::get()->requestIdlePromptTest();
+        return;
+    }
+
+    if (item.kind == KindDownloadHostFile) {
+        if (Session::get() != nullptr) {
+            Session::get()->startDownloadNewestHostFile();
+        }
+        return;
+    }
+
+    if (item.kind == KindSecondWindow) {
+        Session* session = Session::get();
+        QString error;
+        if (session != nullptr && session->openSecondMonitorWindow(error)) {
+            showTransient(error.isEmpty() ? "Opening the second monitor window..." : error.toStdString(), 5000);
+        }
+        else {
+            showTransient(error.isEmpty() ? std::string("Couldn't open the second window") : error.toStdString(), 6000);
+        }
         return;
     }
 
@@ -1594,6 +1913,9 @@ void ShortcutMenu::handleClick(int x, int y)
         }
         else {
             m_RecaptureOnClose = false;
+            // The always-visible button must refresh live On/Off labels too,
+            // including changes made by a mouse-mode hotkey since last open.
+            rebuildItems();
             setExpanded(true);
         }
         return;
@@ -1830,18 +2152,45 @@ bool ShortcutMenu::handleEvent(const SDL_Event& event)
 void ShortcutMenu::drawText(SDL_Surface* dst, TTF_Font* font, const char* text, SDL_Color color,
                             int x, int y, bool rightAlign)
 {
-    if (text == nullptr || text[0] == 0) {
+    if (text == nullptr || text[0] == 0 || font == nullptr || dst == nullptr) {
         return;
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
-    if (surface == nullptr) {
-        return;
+    // SDL_ttf glyph rendering can be expensive when the menu is redrawn on
+    // every hover transition. Cache text/color/font surfaces on the SDL thread.
+    // Limit entries so a long-running session with dynamic status text cannot
+    // grow memory without bound.
+    std::string key;
+    key.reserve(std::strlen(text) + 5);
+    key.push_back(font == m_Font ? 'M' : 'S');
+    key.push_back(static_cast<char>(color.r));
+    key.push_back(static_cast<char>(color.g));
+    key.push_back(static_cast<char>(color.b));
+    key.push_back(static_cast<char>(color.a));
+    key.append(text);
+
+    SDL_Surface* surface = nullptr;
+    auto found = m_TextCache.find(key);
+    if (found != m_TextCache.end()) {
+        surface = found->second;
+    }
+    else {
+        constexpr std::size_t maxCachedLabels = 192;
+        if (m_TextCache.size() >= maxCachedLabels) {
+            for (auto& entry : m_TextCache) {
+                SDL_FreeSurface(entry.second);
+            }
+            m_TextCache.clear();
+        }
+        surface = TTF_RenderUTF8_Blended(font, text, color);
+        if (surface == nullptr) {
+            return;
+        }
+        m_TextCache.emplace(std::move(key), surface);
     }
 
     SDL_Rect dstRect = { rightAlign ? x - surface->w : x, y, surface->w, surface->h };
     SDL_BlitSurface(surface, nullptr, dst, &dstRect);
-    SDL_FreeSurface(surface);
 }
 
 void ShortcutMenu::drawChevron(SDL_Surface* dst, int cx, int cy, bool up, Uint32 color)
@@ -2091,6 +2440,10 @@ void ShortcutMenu::render()
 
 void ShortcutMenu::captureScreenshot()
 {
+    if (m_ScreenshotSaveState) {
+        showTransient("Screenshot is still being saved", 2000);
+        return;
+    }
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(m_Parent, &info)) {
@@ -2114,6 +2467,10 @@ void ShortcutMenu::captureScreenshot()
 
     // Copy the stream area off the composed desktop
     QImage image(w, h, QImage::Format_RGB32);
+    if (image.isNull()) {
+        showTransient("Screenshot failed: out of memory", 3000);
+        return;
+    }
     bool ok = false;
     HDC screen = GetDC(nullptr);
     HDC mem = CreateCompatibleDC(screen);
@@ -2147,20 +2504,41 @@ void ShortcutMenu::captureScreenshot()
         return;
     }
 
-    QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
-    if (!folder.mkpath("Vibelight")) {
-        showTransient("Can't create the Pictures\\Vibelight folder", 3000);
-        return;
-    }
-    const QString file = folder.filePath("Vibelight/Vibelight-" +
-                                         QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + ".png");
-    if (!image.save(file, "PNG")) {
-        showTransient("Couldn't save the screenshot", 3000);
-        return;
-    }
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Shortcut menu: saved screenshot to %s", file.toUtf8().constData());
-    showTransient("Saved to Pictures\\Vibelight", 3000);
+    // PNG compression can stall the SDL event loop, delaying input and video.
+    // Capture pixels here, then do filesystem work and encoding in a worker.
+    // The worker only owns the image and shared completion state: it never
+    // references the ShortcutMenu, SDL window, or its lifetime.
+    auto state = std::make_shared<ScreenshotSaveState>();
+    m_ScreenshotSaveState = state;
+    QThread* thread = QThread::create([state, image = std::move(image)]() mutable {
+        std::string message;
+        QString savedPath;
+        QDir folder(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
+        if (!folder.mkpath("Vibelight")) {
+            message = "Can't create the Pictures\\Vibelight folder";
+        }
+        else {
+            // Milliseconds + a random suffix prevent collisions from quick saves.
+            const QString file = folder.filePath(
+                "Vibelight/Vibelight-" +
+                QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + "-" +
+                QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".png");
+            if (image.save(file, "PNG")) {
+                savedPath = file;
+                message = "Saved to Pictures\\Vibelight";
+            }
+            else {
+                message = "Couldn't save the screenshot";
+            }
+        }
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->notification = std::move(message);
+        state->savedPath = std::move(savedPath);
+        state->finished = true;
+    });
+    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+    showTransient("Saving screenshot...", 2000);
 }
 
 void ShortcutMenu::toggleGraph()

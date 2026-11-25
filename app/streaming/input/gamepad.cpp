@@ -1,3 +1,4 @@
+#include <QtGlobal>
 #include "streaming/session.h"
 
 #include <Limelight.h>
@@ -505,6 +506,11 @@ void SdlInputHandler::handleJoystickBatteryEvent(SDL_JoyBatteryEvent* event)
 
 void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* event)
 {
+    // The second monitor window leaves gamepads to the first window
+    if (qEnvironmentVariableIntValue("VIBELIGHT_SECONDARY") == 1) {
+        return;
+    }
+
     GamepadState* state;
 
     if (event->type == SDL_CONTROLLERDEVICEADDED) {
@@ -813,6 +819,10 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
 
 void SdlInputHandler::handleJoystickArrivalEvent(SDL_JoyDeviceEvent* event)
 {
+    if (qEnvironmentVariableIntValue("VIBELIGHT_SECONDARY") == 1) {
+        return;
+    }
+
     SDL_assert(event->type == SDL_JOYDEVICEADDED);
 
     if (!SDL_IsGameController(event->which)) {

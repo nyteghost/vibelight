@@ -1,3 +1,6 @@
+Mouse between screens
+- New saved "Keep mouse unlocked between screens" option in Settings and at the top of the streaming shortcuts menu. Uses desktop mouse control; turn off for games that need capture. Physical Windows testing is pending.
+
 Shortcuts menu (Ctrl+Alt+Shift+H)
 - The shortcuts button is now a small round button with the Vibelight icon. It starts hidden: Ctrl+Alt+Shift+H shows it, opens the menu and frees the mouse. A Settings option keeps it always on top instead (drag it anywhere).
 - Tidier layout: a short top level with Pinned & recent and categories (Remote PC, Displays, Vibelight, Tools, My shortcuts, Clipboard). Click Back or press Esc to go up.

@@ -1378,7 +1378,26 @@ SettingsWorkspace {
             anchors.fill: parent
             spacing: 8
                 WrappingCheckBox {
+                    id: keepMouseUnlockedCheck
+                    width: parent.width
+                    text: qsTr("Keep mouse unlocked between screens")
+                    font.pointSize: 12
+                    visible: SystemProperties.hasDesktopEnvironment
+                    checked: SystemProperties.keepMouseUnlocked()
+                    onClicked: SystemProperties.setKeepMouseUnlocked(checked)
+                }
+
+                Label {
+                    width: parent.width
+                    visible: SystemProperties.hasDesktopEnvironment
+                    text: qsTr("Move and click between the stream and this PC without trapping the mouse. Uses desktop mouse control; turn off for games that need capture. Saved for future streams. To change it now, use the same option at the top of the streaming shortcuts menu.")
+                    wrapMode: Text.Wrap
+                    font.pointSize: 11
+                }
+
+                WrappingCheckBox {
                     id: absoluteMouseCheck
+                    enabled: !SystemProperties.hasDesktopEnvironment || !keepMouseUnlockedCheck.checked
                     hoverEnabled: true
                     width: parent.width
                     text: qsTr("Optimize mouse for remote desktop instead of games")

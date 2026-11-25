@@ -894,6 +894,18 @@ void ShortcutMenu::addCategoryRows(bool hasTopColumn)
 
     m_PageTitles[PageRoot].push_back("Menu");
 
+    // Always visible on the root page, even with no pinned shortcuts.
+    Item mouseMode;
+    mouseMode.label = "Keep mouse unlocked between screens";
+    mouseMode.hint = m_Input->keepsMouseUnlocked() ? "On" : "Off";
+    mouseMode.kind = KindKeepMouseUnlocked;
+    mouseMode.clientCombo = -1;
+    mouseMode.dangerous = false;
+    mouseMode.column = hasTopColumn ? 1 : 0;
+    mouseMode.page = PageRoot;
+    mouseMode.rect = {0, 0, 0, 0};
+    m_Items.push_back(mouseMode);
+
     for (const Category& category : categories) {
         const int count = itemsOnPage(category.page);
         if (count == 0) {
@@ -1655,6 +1667,17 @@ void ShortcutMenu::execute(const Item& itemRef)
         return;
     }
 
+    if (item.kind == KindKeepMouseUnlocked) {
+        // Change policy before dismissal restores input, so it cannot briefly
+        // recapture the cursor in relative mode when enabling this option.
+        const bool enabled = !m_Input->keepsMouseUnlocked();
+        m_Input->setKeepMouseUnlocked(enabled);
+        dismiss(true);
+        showTransient(enabled ? "Mouse stays unlocked between screens (saved)"
+                              : "Normal mouse mode restored (saved)", 4000);
+        return;
+    }
+
     if (item.kind == KindOpenConfig) {
         // Hide the button, then open the file in whatever editor the OS prefers
         dismiss(false);
@@ -1872,6 +1895,9 @@ void ShortcutMenu::handleClick(int x, int y)
         }
         else {
             m_RecaptureOnClose = false;
+            // The always-visible button must refresh live On/Off labels too,
+            // including changes made by a mouse-mode hotkey since last open.
+            rebuildItems();
             setExpanded(true);
         }
         return;

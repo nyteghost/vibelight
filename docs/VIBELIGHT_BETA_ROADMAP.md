@@ -265,6 +265,18 @@ regressions. Full active client-to-host bandwidth testing needs new authenticate
 host support and remains open. Local policy tests pass; Windows CI and physical
 remote/LAN validation remain pending. No performance improvement is claimed.
 
+
+### Persistent mouse unlock — November 22, 2026
+
+- Added an opt-in saved **Keep mouse unlocked between screens** option in
+  Settings and the root streaming menu. It overrides relative mouse capture and
+  pointer-region confinement, including after resume clicks and menu dismissal.
+- Normal mouse-mode preferences are retained; explicit game-mode switching exits
+  the override. The host protocol, host installation and releases are unchanged.
+- Policy and temporary-file settings tests added to CI. Physical Windows
+  dual-screen, scaling, focus, drag and stock-host checks remain pending.
+- See [Mouse unlock](MOUSE_UNLOCK.md) for controls, limits and the test checklist.
+
 ### Task 1 — explicit bitrate ownership (unvalidated on hardware)
 
 Source audit found one live desktop controller: per-host adaptation configures

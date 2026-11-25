@@ -13,7 +13,7 @@ void SdlInputHandler::notifyMouseLeave()
         //
         // On macOS and X11, capturing the mouse allows us to receive mouse motion outside the
         // window (button up already worked without capture).
-        if (m_AbsoluteMouseMode && isCaptureActive()) {
+        if (isAbsoluteMouseMode() && isCaptureActive()) {
             // NB: Not using SDL_GetGlobalMouseState() because we want our state not the system's
             Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
             for (Uint32 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++) {
@@ -48,7 +48,7 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Not capturing
         return;
     }
-    else if (m_AbsoluteMouseMode && !isMouseInVideoRegion(event->x, event->y) && event->state == SDL_PRESSED) {
+    else if (isAbsoluteMouseMode() && !isMouseInVideoRegion(event->x, event->y) && event->state == SDL_PRESSED) {
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
@@ -119,7 +119,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
     // We should not reference the original event anymore
     event = nullptr;
 
-    if (m_AbsoluteMouseMode) {
+    if (isAbsoluteMouseMode()) {
         int windowWidth, windowHeight;
         SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
 
@@ -189,7 +189,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         return;
     }
 
-    if (m_AbsoluteMouseMode) {
+    if (isAbsoluteMouseMode()) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
         if (!isMouseInVideoRegion(mouseX, mouseY)) {
@@ -300,7 +300,7 @@ void SdlInputHandler::updatePointerRegionLock()
     }
 
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.
-    if (isCaptureActive() && m_PointerRegionLockActive) {
+    if (m_MouseCapturePolicy.confinePointer(isCaptureActive(), m_PointerRegionLockActive)) {
 #if SDL_VERSION_ATLEAST(2, 0, 18)
         SDL_Rect src, dst;
 
@@ -327,6 +327,7 @@ void SdlInputHandler::updatePointerRegionLock()
         // Allow the cursor to leave the bounds of our video region or window
 #if SDL_VERSION_ATLEAST(2, 0, 18)
         SDL_SetWindowMouseRect(m_Window, nullptr);
+        SDL_SetWindowMouseGrab(m_Window, SDL_FALSE);
 #elif SDL_VERSION_ATLEAST(2, 0, 15)
         SDL_SetWindowMouseGrab(m_Window, SDL_FALSE);
 #else

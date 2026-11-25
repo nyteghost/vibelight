@@ -232,6 +232,8 @@ HEADERS += \
     settings/streamingpreferences.h \
     settings/hostprofile.h \
     settings/hostprofilestore.h \
+    settings/mousecapturepolicy.h \
+    settings/mousecapturestore.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/shortcutmenu.h \

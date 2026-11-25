@@ -227,6 +227,11 @@ public final class TvStreamUi {
             attachFailureOnly(h);
         }
         renderStages(h);
+        // The core's message can be long (port lists); keep the actions on screen by
+        // collapsing the stage list (its failed step is named in the text) and the ring.
+        h.stageList.setVisibility(View.GONE);
+        h.ring.getLayoutParams().width = h.ring.getLayoutParams().height = Vibe.dp(a, 72);
+        h.ring.requestLayout();
         h.ring.setMode(RingView.Mode.FAILED);
         h.title.setText(title);
         h.title.setTextColor(Vibe.ERROR);

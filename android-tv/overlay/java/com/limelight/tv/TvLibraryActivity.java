@@ -126,6 +126,8 @@ public final class TvLibraryActivity extends Activity implements HostService.Lis
         page.addView(spot, new LinearLayout.LayoutParams(-1, dp(210)));
 
         ScrollView scroll = new ScrollView(this);
+
+        scroll.setFocusable(false);
         scroll.setVerticalScrollBarEnabled(false);
         rows = Vibe.column(this, 14);
         rows.setPadding(0, dp(4), 0, dp(32));
@@ -256,6 +258,7 @@ public final class TvLibraryActivity extends Activity implements HostService.Lis
     private void addRow(String title, List<Library.Game> list, String rowKey) {
         rows.addView(Vibe.oneLine(this, title, Vibe.H2, Vibe.TEXT, true));
         HorizontalScrollView hs = new HorizontalScrollView(this);
+        hs.setFocusable(false);
         hs.setHorizontalScrollBarEnabled(false);
         hs.setClipToPadding(false);
         hs.setPadding(dp(6), dp(10), dp(6), dp(10));

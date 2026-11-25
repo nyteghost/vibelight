@@ -118,6 +118,8 @@ public final class TvLauncherActivity extends Activity implements HostService.Li
         page.addView(heading);
 
         HorizontalScrollView scroller = new HorizontalScrollView(this);
+
+        scroller.setFocusable(false);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setClipToPadding(false);
         scroller.setPadding(dp(8), dp(12), dp(8), dp(12));

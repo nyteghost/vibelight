@@ -424,6 +424,7 @@ public final class TvStreamUi {
         int screen = a.getResources().getDisplayMetrics().widthPixels;
         int width = PanelGeometry.width(screen, Vibe.dp(a, 380), Vibe.dp(a, 280));
         android.widget.ScrollView scroll = new android.widget.ScrollView(a);
+        scroll.setFocusable(false);
         scroll.setFillViewport(true);
         scroll.addView(panel);
         root.addView(scroll, Vibe.frame(width, -1, Gravity.END));

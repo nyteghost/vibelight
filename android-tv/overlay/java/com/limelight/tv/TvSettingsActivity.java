@@ -66,6 +66,8 @@ public final class TvSettingsActivity extends Activity implements HostService.Li
         root.addView(split, new FrameLayout.LayoutParams(-1, -1));
 
         ScrollView railScroll = new ScrollView(this);
+
+        railScroll.setFocusable(false);
         railScroll.setBackgroundColor(Vibe.BG2);
         railScroll.setVerticalScrollBarEnabled(false);
         rail = Vibe.column(this, 6);
@@ -107,6 +109,7 @@ public final class TvSettingsActivity extends Activity implements HostService.Li
         heading = Vibe.oneLine(this, "", Vibe.H1, Vibe.TEXT, true);
         right.addView(heading);
         ScrollView scroll = new ScrollView(this);
+        scroll.setFocusable(false);
         scroll.setVerticalScrollBarEnabled(false);
         content = Vibe.column(this, 12);
         content.setPadding(0, dp(4), 0, dp(40));

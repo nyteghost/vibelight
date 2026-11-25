@@ -2327,19 +2327,18 @@ void Session::tickAutoBitrate()
 {
     if (!m_AutoBrStarted) {
         m_AutoBrStarted = true;
-        m_AutoBrEnabled = !isSecondaryWindow() &&
-                          m_Preferences->sessionAdaptiveBitrate() &&
-                          !m_Computer->isNvidiaServerSoftware &&
-                          m_StreamConfig.bitrate > 0;
-        if (m_AutoBrEnabled) {
-            m_AutoBr.reset(new vibelight::AutoBitrateController(m_StreamConfig.bitrate / 1000.0));
+        m_AutoBr.reset(new vibelight::SessionBitrateController(
+            m_StreamConfig.bitrate, m_Preferences->sessionBitratePolicy(),
+            isSecondaryWindow(), m_Computer->isNvidiaServerSoftware));
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Bitrate owner: %s; settings: %s",
+                    m_AutoBr->owner(), m_AutoBr->settingsSource());
+        if (m_AutoBr->active()) {
             m_AutoBrResult = std::make_shared<std::atomic<int>>(0);
-            m_AutoBrLastKbps = m_StreamConfig.bitrate;
             m_AutoBrNextTick = SDL_GetTicks() + 10000;   // let the stream settle first
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate is on (ceiling %d kbps)", m_StreamConfig.bitrate);
         }
     }
-    if (!m_AutoBrEnabled) {
+    if (!m_AutoBr->active()) {
         return;
     }
 
@@ -2374,23 +2373,14 @@ void Session::tickAutoBitrate()
             return;
         }
 
-        if (result == -1) {
-            // update() made a tentative decision; the host did not accept it.
-            // Keep the next decision based on the last confirmed bitrate.
-            m_AutoBr->syncAppliedMbps(m_AutoBrLastKbps / 1000.0);
-            if (++m_AutoBrFailures >= 2) {
-                m_AutoBrEnabled = false;
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
-                showBitrateNotice("Automatic bitrate paused: this host didn't accept the change", 7000);
-                return;
-            }
+        const int previousKbps = m_AutoBr->confirmedKbps();
+        const auto completion = m_AutoBr->complete(result);
+        if (completion == vibelight::BitrateCompletion::Paused) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate paused: the host did not accept the change");
+            showBitrateNotice("Automatic bitrate paused: this host didn't accept the change", 7000);
+            return;
         }
-        else if (result > 0) {
-            m_AutoBrFailures = 0;
-            const int previousKbps = m_AutoBrLastKbps;
-            m_AutoBrLastKbps = result;
-            // The server can clamp a request to its configured maximum.
-            m_AutoBr->syncAppliedMbps(result / 1000.0);
+        else if (completion == vibelight::BitrateCompletion::Applied) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: host confirmed %d kbps", result);
             if (result != previousKbps) {
                 char buf[160];
@@ -2433,18 +2423,15 @@ void Session::tickAutoBitrate()
     const bool decoderBound = sample.avgDecodeMs > frameMs * 0.8 ||
                               (sample.pacerDropPercent >= 2.0 && sample.dropPercent < 1.0);
 
-    const double next = m_AutoBr->update(now, sample.dropPercent, decoderBound);
-    if (next <= 0) {
+    const int kbps = m_AutoBr->request(vibelight::BitrateProposalSource::ClientAutomatic,
+                                       now, sample.dropPercent, decoderBound);
+    if (kbps <= 0) {
         return;
     }
 
-    // Skip if the previous request is somehow still running
-    int idle = 0;
-    if (!m_AutoBrResult->compare_exchange_strong(idle, -2)) {
-        return;
-    }
-
-    const int kbps = (int)(next * 1000);
+    // The session controller reserves one request. Only this event-loop thread
+    // starts workers, and it consumes the prior result before requesting again.
+    m_AutoBrResult->store(-2);
     // Do not update the confirmed bitrate or show a success message until
     // setRuntimeBitrate() returns the host's applied value.
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Automatic bitrate: requesting %d kbps (%.1f%% dropped)", kbps, sample.dropPercent);
@@ -2686,6 +2673,8 @@ QJsonObject Session::streamCheckContext() const
     return {{"codec", codec}, {"width", m_ActiveVideoWidth}, {"height", m_ActiveVideoHeight},
             {"fps", m_ActiveVideoFrameRate}, {"client_configured_bitrate_kbps", m_StreamConfig.bitrate},
             {"adaptive_bitrate_requested", m_Preferences->sessionAdaptiveBitrate()},
+            {"bitrate_settings_source", m_Preferences->sessionBitratePolicy().settingsSource()},
+            {"bitrate_owner", m_AutoBr ? m_AutoBr->owner() : "not_started"},
             {"secondary_window", isSecondaryWindow()},
             {"ten_bit", bool(m_ActiveVideoFormat & VIDEO_FORMAT_MASK_10BIT)}};
 }

@@ -264,3 +264,13 @@ advice, explicit per-host Apply-and-lock and unlock actions, and counter/quality
 regressions. Full active client-to-host bandwidth testing needs new authenticated
 host support and remains open. Local policy tests pass; Windows CI and physical
 remote/LAN validation remain pending. No performance improvement is claimed.
+
+### Task 1 — explicit bitrate ownership (unvalidated on hardware)
+
+Source audit found one live desktop controller: per-host adaptation configures
+that controller and the host advisor is read-only. The proposed session arbiter
+centralizes ownership, pending/confirmed state, failure handling and the existing
+cooldown timeline. It preserves the single-controller algorithm and next-stream
+Apply-and-lock behavior. [Inventory, design and tests](BITRATE_OWNERSHIP.md).
+CI results belong to the exact PR head; physical Windows/CachyOS validation and
+any future feature-negotiated distributed ownership remain open. No promotion.

@@ -1,8 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <instrumentation android:name="com.limelight.tv.TvNavigationProbe"
-        android:targetPackage="io.github.nyteghost.vibelight.tv.beta"
+        android:targetPackage="${applicationId}"
         android:label="TV pairing navigation regression checks" />
     <instrumentation android:name="com.limelight.tv.TvUpdateProbe"
-        android:targetPackage="io.github.nyteghost.vibelight.tv.beta"
+        android:targetPackage="${applicationId}"
         android:label="TV updater verification and installer checks" />
+    <instrumentation android:name="com.limelight.tv.TvStreamProbe"
+        android:targetPackage="${applicationId}"
+        android:label="Connection screen and in-stream panel checks without a PC" />
+    <application>
+        <activity android:name="com.limelight.tv.TvPanelHostActivity" android:exported="false"
+            android:screenOrientation="landscape" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+    </application>
+    <instrumentation android:name="com.limelight.tv.TvDesignProbe"
+        android:targetPackage="${applicationId}"
+        android:label="Vibelight TV design-system checks (text size, target size, dead ends)" />
 </manifest>

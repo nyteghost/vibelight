@@ -5,7 +5,18 @@ root=pathlib.Path(sys.argv[1]);ns={'a':'http://schemas.android.com/apk/res/andro
 manifest=ET.parse(root/'app/src/main/AndroidManifest.xml').getroot();app=manifest.find('application')
 assert app.get(a+'allowBackup')=='false'
 launchers=[activity for activity in app.findall('activity') if any(c.get(a+'name')=='android.intent.category.LEANBACK_LAUNCHER' for c in activity.findall('intent-filter/category'))]
-assert len(launchers)==1 and launchers[0].get(a+'name')=='.tv.TvHomeActivity'
+assert len(launchers)==1 and launchers[0].get(a+'name')=='.tv.TvLauncherActivity'
+classic=app.find("activity[@a:name='.tv.TvHomeActivity']",ns)
+assert classic is not None and not classic.findall('intent-filter'), 'Classic dashboard kept, not a second launcher'
+for modern in ('TvLibraryActivity','TvPairActivity','TvSettingsActivity','TvAddPcActivity'):
+    m=app.find("activity[@a:name='.tv."+modern+"']",ns)
+    assert m is not None and m.get(a+'exported')=='false', modern
+game_src=(root/'app/src/main/java/com/limelight/Game.java').read_text()
+for hook in ('TvStreamUi.attach(this)','TvStreamUi.onKey(this, event)','TvStreamUi.onMotion(this, event)','TvStreamUi.connectionStarted(this)','TvStreamUi.failed(Game.this','TvStreamUi.detach(this)'):
+    assert hook in game_src, hook
+assert 'SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title)' not in game_src
+ctl=(root/'app/src/main/java/com/limelight/binding/input/ControllerHandler.java').read_text()
+assert 'TvStreamUi.inputBlocked()' in ctl and 'vibeReleaseAll' in ctl and 'TvStreamUi.onQuitCombo(activityContext)' in ctl
 assert any(x.get(a+'name')=='android.hardware.touchscreen' and x.get(a+'required')=='false' for x in manifest.findall('uses-feature'))
 assert any(x.get(a+'name')=='android.software.leanback' and x.get(a+'required')=='true' for x in manifest.findall('uses-feature'))
 assert app.find("activity[@a:name='.Game']",ns) is not None
@@ -17,7 +28,8 @@ assert not (root/'app/src/main/java/com/limelight/tv/TvNavigationProbe.java').ex
 assert 'returnToDashboard(computer.uuid)' in (root/'app/src/main/java/com/limelight/PcView.java').read_text()
 assert app.find("activity[@a:name='.preferences.AddComputerManually']",ns) is not None
 metadata=json.loads((root/'vibelight-build.json').read_text())
-assert metadata['applicationId']=='io.github.nyteghost.vibelight.tv.beta'
+assert metadata['channel'] in ('beta','dev')
+assert metadata['applicationId']=='io.github.nyteghost.vibelight.tv.'+metadata['channel']
 assert metadata['abi'] in ['arm64-v8a','x86']
 assert metadata['versionCode']>0
 assert metadata['sourceRevision']

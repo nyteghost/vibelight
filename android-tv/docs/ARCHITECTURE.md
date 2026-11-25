@@ -134,3 +134,20 @@ installer prompt. It does not complete a physical Shield upgrade or claim a live
 stream's successful cleanup. The first updater build has no newer published version
 to install until the next beta; physical download→upgrade/pairing preservation remains
 a manual acceptance case. Cached debug signing remains an interim limitation.
+
+## ADR: modern UI framework (0.3.0, 2026-11-25)
+
+The six modern screens are Java Views built on a small design system (`tv/ui/Vibe.java`)
+with Android-independent logic in `tv/logic/` (unit-tested on a plain JVM). Kotlin +
+Compose for TV was evaluated with a real feasibility build (`--compose`, CI flavor
+`compose-spike`: Kotlin 1.9.25, Compose BOM 2024.09.00, tv-material 1.0.0 on the pinned
+AGP 8.2.2 / compileSdk 34). Views were chosen for this milestone because they add no
+dependencies to the stream activity, keep the build's dependency set unchanged, and could be
+type-checked continuously during development; the screens' logic is framework-neutral so a
+later Compose port is screen-local if the spike's measurements on the Shield justify it.
+
+The stream activity stays upstream code. Vibelight adds checked `replace_once` hooks only:
+the connection screen replaces the spinner, failure dialogs route to an actionable screen,
+key/motion handlers ask `TvStreamUi` first, the quit combo opens the panel (configurable),
+and `ControllerHandler` gains a release-all method and a packet gate used only while the
+panel is open.

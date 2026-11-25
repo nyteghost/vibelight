@@ -276,3 +276,13 @@ remote/LAN validation remain pending. No performance improvement is claimed.
 - Policy and temporary-file settings tests added to CI. Physical Windows
   dual-screen, scaling, focus, drag and stock-host checks remain pending.
 - See [Mouse unlock](MOUSE_UNLOCK.md) for controls, limits and the test checklist.
+
+### Task 1 — explicit bitrate ownership (unvalidated on hardware)
+
+Source audit found one live desktop controller: per-host adaptation configures
+that controller and the host advisor is read-only. The proposed session arbiter
+centralizes ownership, pending/confirmed state, failure handling and the existing
+cooldown timeline. It preserves the single-controller algorithm and next-stream
+Apply-and-lock behavior. [Inventory, design and tests](BITRATE_OWNERSHIP.md).
+CI results belong to the exact PR head; physical Windows/CachyOS validation and
+any future feature-negotiated distributed ownership remain open. No promotion.

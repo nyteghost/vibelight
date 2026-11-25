@@ -45,6 +45,8 @@ jobs:
           ./logic_tests
           g++ -std=c++17 -Wall -Wextra -Werror -I app tests/mouse_capture_tests.cpp -o mouse_capture_tests
           ./mouse_capture_tests
+          g++ -std=c++17 -Wall -Wextra -Werror -I app tests/bitrate_ownership_tests.cpp -o bitrate_ownership_tests
+          ./bitrate_ownership_tests
           g++ -std=c++17 -Wall -Wextra -Werror -I app tests/streamcheck_tests.cpp -o streamcheck_tests
           ./streamcheck_tests /tmp/streamcheck.zip
           python3 -c 'import zipfile,json; z=zipfile.ZipFile("/tmp/streamcheck.zip"); assert z.testzip() is None; assert z.namelist()==["report.json","README.txt"]; assert json.loads(z.read("report.json"))["schema"]==1'

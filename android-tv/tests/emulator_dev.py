@@ -66,6 +66,8 @@ def focus(target, keys=(22, 20, 21, 19), limit=60):
             key(direction, .15); seen += 1
     shot('focus-failure-' + re.sub('[^a-z]', '', target.lower()))
     (out / ('focus-failure-' + re.sub('[^a-z]', '', target.lower()) + '.xml')).write_text(ET.tostring(dump(), encoding='unicode'))
+    tree = dump()
+    print('FOCUSED:', focused_text(), '| FOCUSABLE:', [n.get('text') or n.get('class') for n in tree.iter('node') if n.get('focusable') == 'true'])
     raise AssertionError('D-pad could not reach ' + target)
 
 
@@ -136,10 +138,8 @@ try:
         assert wait_for('Add a PC by IP address'), texts(dump())
         shot('02-add-pc')
         adb('shell', 'input', 'text', 'not..valid')
-        key(66, .4)
-        focus('Add PC', keys=(20, 22))
-        key(23, 1.0)
-        assert has("doesn't look like an address") or has('No PC answered'), texts(dump())
+        key(66, 1.0)  # IME action submits; D-pad would go to the on-screen keyboard
+        assert wait_for("doesn't look like an address", 6) or has('No PC answered'), texts(dump())
         shot('02-add-pc-invalid')
         key(4, .5); key(4, .5)
 
@@ -162,3 +162,11 @@ finally:
         (out / 'logcat.txt').write_text(adb('logcat', '-d'))
     except Exception:
         pass
+    # Small JPEG copies in the job log, so reviewers without artifact access can see the
+    # screens. Full-size PNGs stay in the evidence artifact.
+    import base64, shutil
+    if shutil.which('convert'):
+        for png in sorted(out.glob('*.png'))[:24]:
+            jpg = png.with_suffix('.preview.jpg')
+            if subprocess.run(['convert', str(png), '-resize', '960x540', '-quality', '72', str(jpg)]).returncode == 0:
+                print('VIBE_SHOT', png.stem, base64.b64encode(jpg.read_bytes()).decode())

@@ -192,10 +192,13 @@ public final class TvSettingsActivity extends Activity implements HostService.Li
         box.addView(Vibe.text(this, item.summary + ". Low latency 35, Balanced 50, Best picture 75 Mbps. Resolution, frame rate and HDR are not changed.", Vibe.LABEL, Vibe.TEXT2, false));
         LinearLayout r = Vibe.row(this, 14);
         for (final BitrateProfile p : BitrateProfile.values()) {
-            r.addView(Vibe.button(this, (p.kbps == kbps ? "✓ " : "") + p.label, p.kbps == kbps, v -> {
+            TextView b = Vibe.button(this, p.label, p.kbps == kbps, v -> {
                 TvPrefs.applyBitrateOnly(this, p);
                 render();
-            }), Vibe.weight(1));
+            });
+            b.setPadding(dp(12), b.getPaddingTop(), dp(12), b.getPaddingBottom());
+            b.setContentDescription(p.label + (p.kbps == kbps ? ", selected" : ""));
+            r.addView(b, Vibe.weight(1));
         }
         box.addView(r);
         return box;
